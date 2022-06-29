@@ -10,15 +10,23 @@
 <body>
   <div id="sence1">
     <div class="header">
-      <button id="btnClose" onclick="closed()"><i class="fa-solid fa-angle-left"></i> </button>
-      <h1>แจ้งปัญหาการใช้งาน</h1>
+      <button id="btnClose" onclick="closed()"><i class="fa-solid fa-chevron-left"></i> </button>
+      <h1 class="font-title">แจ้งปัญหาการใช้งาน</h1>
       <p>เพื่อให้การตรวจสอบและแก้ไขปัญหาดำเนินไปได้อย่างรวดเร็ว กรุณากรอกข้อมูลให้ถูกต้องชัดเจน หรือแนบรูปภาพระหว่างมีปัญหาเข้ามา</p>
     </div>
+    <div class="box-shadow"></div>
     <div class="content">
-      รหัสประจำโครงการ*
+      <div class="form-group">
+      <div class="form-label-block">
+        <label class="form-label">รหัสประจำโครงการ<span class="required">*</span></label>
+       </div>
+       <div class="form-control-block">
         <input type="text" class="form-control" />
-        <button type="button">ค้นหา</button>
+      </div>
+      <div class="hr"></div>
+        <button type="button" id="btn_search_proj" class="btn btn-main btn-green">ค้นหา</button>
     </div>
+  </div>
  </div>
   <!--<p id="os"><b>OS:</b> </p>
   <p id="language"><b>Language:</b> </p>
