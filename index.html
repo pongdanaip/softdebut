@@ -7,7 +7,17 @@
   <link rel="stylesheet" href="css/style.css" media="all">
 </head>
 <body>
-  <p id="os"><b>OS:</b> </p>
+<div class="header">
+  <div class="btnback"> back </div>
+  <h1>แจ้งปัญหาการใช้งาน</h1>
+  <p>เพื่อให้การตรวจสอบและแก้ไขปัญหาดำเนินไปได้อย่างรวดเร็ว กรุณากรอกข้อมูลให้ถูกต้องชัดเจน หรือแนบรูปภาพระหว่างมีปัญหาเข้ามา</p>
+</div>
+  <div class="content">
+    รหัสประจำโครงการ*
+      <input type="text" class="form-control" />
+      <button type="button">ค้นหา</button>
+  </div>
+  <!--<p id="os"><b>OS:</b> </p>
   <p id="language"><b>Language:</b> </p>
   <p id="version"><b>Version:</b> </p>
   <p id="isInClient"><b>isInClient:</b> </p>
@@ -35,7 +45,7 @@
   <button id="btnScanCode" onclick="scanCode()">Scan Code</button>
   <button id="btnLogOut" onclick="logOut()">Log Out</button>
   <button id="btnClose" onclick="closed()">Close</button>
-
+  -->
   <script src="js/vconsole.min.js"></script>
   <script>
     var vConsole = new VConsole()
@@ -124,7 +134,7 @@
 
     async function main() {
       //alert("LINE Developers x Skooldio")
-      await liff.init({ liffId: "1657259345-yeKq1q6V" })
+      await liff.init({ liffId: "1657255839-RA9AE60N" })
       document.getElementById("isLoggedIn").append(liff.isLoggedIn())
       if(liff.isLoggedIn()){
        getEnvironment()
