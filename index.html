@@ -9,7 +9,7 @@
 </head>
 <body>
 <div class="header">
-  <div class="btnback"> back </div>
+  <button id="btnClose" onclick="closed()"><i class="fa-solid fa-angle-left"></i> </button>
   <h1>แจ้งปัญหาการใช้งาน</h1>
   <p>เพื่อให้การตรวจสอบและแก้ไขปัญหาดำเนินไปได้อย่างรวดเร็ว กรุณากรอกข้อมูลให้ถูกต้องชัดเจน หรือแนบรูปภาพระหว่างมีปัญหาเข้ามา</p>
 </div>
@@ -73,15 +73,11 @@
     }
 
     function closed() {
+      liff.closeWindow()
     }
-
-    async function scanCode() {
-    }
+    
 
     function openWindow() {
-    }
-
-    async function getFriendship() {
     }
 
     async function sendMsg() {
@@ -96,7 +92,7 @@
         ])
         
       }else{
-        alert("Message sent");
+        alert("Message Unsent");
       }
     }
 
@@ -134,18 +130,16 @@
     }
 
     async function main() {
-      //alert("LINE Developers x Skooldio")
       await liff.init({ liffId: "1657255839-RA9AE60N" })
-      document.getElementById("isLoggedIn").append(liff.isLoggedIn())
+      /*document.getElementById("isLoggedIn").append(liff.isLoggedIn())
       if(liff.isLoggedIn()){
        getEnvironment()
        getUserProfile()
        getContext()
       }else{
         liff.login()
-      }
-      // getFriendship()
-      // createUniversalLink()
+      }*/
+     
     }
     main()
   </script>
