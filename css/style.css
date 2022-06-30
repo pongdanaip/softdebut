@@ -179,13 +179,35 @@ textarea{
 }
 .ticketimg_item {
   font-size: 14px;
+  display: flex;
+    justify-content: space-between;
+}
+.ticketimg_item +.ticketimg_item {
+  margin-top: 10px;
 }
 .lbl-error{
   color: red;
   font-size: 12px;
   display: none;
 }
+.font-blue{
+  color: #246bfd
 
+}
+.ticketimg_item i.fa-file-lines,
+.ticketimg_item .fa-circle-xmark{
+  font-size: 24px;
+}
+
+.tickent-img-txt{
+  display: flex;
+}
+.tickent-img-txt .ticketimgtextwrap{
+  margin-left: 10px;
+}
+.ticketimg_item .fa-circle-xmark{
+  color: #b1b1b1
+}
 
 /*-------Loading---------*/
 @keyframes ldio-ut6coayxxza {
