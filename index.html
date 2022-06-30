@@ -30,7 +30,7 @@
           <label class="form-label">รหัสประจำโครงการ<span class="required">*</span></label>
         </div>
         <div class="form-control-block">
-          <input type="text" id="input_proj" class="form-control" oninput="checkempty(this,'step1')" />
+          <input type="text" id="input_proj" class="form-control" oninput="checkempty(this,'step1')" placeholder="กรอก T009 เพื่อทดสอบ" />
           <span id="lbl-error" class="lbl-error">ไม่พบรหัสโครงการ</span>
         </div>
         <div class="hr" id="hrline1"></div>
@@ -114,7 +114,7 @@
   
     function searchproj(e) {
       showloading()
-      var inputval = document.getElementById("input_proj").value
+      var inputval = document.getElementById("input_proj").value.toUpperCase();
       if(inputval == "T009"){
         showstep2()
         
