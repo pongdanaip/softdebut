@@ -216,15 +216,17 @@
     }
     function sendticket(e) {
       //showloading()
+      sendMsg()
       closed()
       //setTimeout(closed, 4000);
-      sendMsg()
+      
     }
 
 
     async function sendMsg() {
 
       if (liff.getContext().type !== "none") {
+        
         await liff.sendMessages([
           {
             "type": "sticker",
@@ -232,9 +234,9 @@
             "packageId": 1
           }
         ])
-
+        alert("Message sent");
       } else {
-        //alert("Message Unsent");
+        alert("Message Unsent");
       }
     }
     
