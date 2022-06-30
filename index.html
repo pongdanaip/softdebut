@@ -109,8 +109,8 @@
     }
 
 
-    async function closed() {
-      await liff.closeWindow()
+   function closed() {
+       liff.closeWindow()
     }
    function backstep() {
       showstep1()
@@ -184,7 +184,7 @@
         else {
           var maxfile = document.getElementById("ticketimg").childElementCount;
           if (maxfile < 5) {
-            document.getElementById("ticketimg").innerHTML += "<div class='ticketimg_item'><i class='fa-solid fa-file-lines'></i><a href='" + URL.createObjectURL(event.target.files[i]) + "'><span class='img-file-name'>" + fname + "</span></a><img src='" + URL.createObjectURL(event.target.files[i]) + "'   class='img-ticket-item' style='display:none'><br>(" + fsize / 1000 + "KB)<i class='fa-solid fa-circle-xmark' onclick='removeimg(this)'></i></div>"
+            document.getElementById("ticketimg").innerHTML += "<div class='ticketimg_item '><div class='tickent-img-txt'><i class='fa-solid fa-file-lines font-blue'></i><div class='ticketimgtextwrap'><a target='_blank' href='" + URL.createObjectURL(event.target.files[i]) + "'><span class='img-file-name font-blue'>" + fname + "</span></a><img src='" + URL.createObjectURL(event.target.files[i]) + "'   class='img-ticket-item' style='display:none'><br>(" + fsize / 1000 + "KB)</div></div><i class='fa-solid fa-circle-xmark' onclick='removeimg(this)'></i></div>"
           } else {
             alert("สามารถแนบไฟล์ได้สูงสุด 5 ไฟล์")
           }
