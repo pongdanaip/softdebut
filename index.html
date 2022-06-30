@@ -33,6 +33,8 @@
   <p id="universalLink1"><b>Universal Link:</b> </p>
   <p id="universalLink2"><b>Universal Link with Query params:</b> </p>
   <button id="btnMsg" onclick="sendMsg()">Send Message</button>
+  <button id="btnShare" onclick="shareMsg()">Share Target Picker</button>
+
   <div id="sence1">
     <div class="header">
       <!--<button id="btnClose"  onclick="closed()"><i class="fa-solid fa-chevron-left"></i> </button>-->
@@ -256,9 +258,8 @@
         
         await liff.sendMessages([
           {
-            "type": "sticker",
-            "stickerId": 1,
-            "packageId": 1
+            "type": "text",
+             "text": "สวัสดีค่ะ, ทางบริษัทได้รับข้อมูลเรียบร้อยแล้วค่ะ, Ticket ID : SDB-RE0001"
           }
         ])
         alert("Message sent");
