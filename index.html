@@ -9,8 +9,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css"
     integrity="sha512-KfkfwYDsLkIlwQp6LFnl8zNdLGxu9YAA1QvwINks4PhcElQSvqcyVLLD9aMhXd13uQjoXtEKNosOWaZqXgel0g=="
     crossorigin="anonymous" referrerpolicy="no-referrer" />
-
-  <link rel="stylesheet" href="https://unpkg.com/dropzone@5/dist/min/dropzone.min.css" type="text/css" />
 </head>
 
 <body>
@@ -87,17 +85,15 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/dropzone@5/dist/min/dropzone.min.js"></script>
   <script src="js/vconsole.min.js"></script>
   <script>
-    //var vConsole = new VConsole()
-    //console.log("Hello World!")
+    var vConsole = new VConsole()
+    console.log("Hello World!")
   </script>
 
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    function createUniversalLink() {
-    }
+
 
     async function shareMsg() {
       await liff.shareTargetPicker([
