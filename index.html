@@ -16,7 +16,8 @@
 <body>
   <div id="sence1">
     <div class="header">
-      <button id="btnClose" onclick="closed()"><i class="fa-solid fa-chevron-left"></i> </button>
+      <!--<button id="btnClose"  onclick="closed()"><i class="fa-solid fa-chevron-left"></i> </button>-->
+      <button id="btnback" class="disabled" onclick="backstep()"><i class="fa-solid fa-chevron-left"></i> </button>
       <h1 class="font-title">แจ้งปัญหาการใช้งาน</h1>
       <p>เพื่อให้การตรวจสอบและแก้ไขปัญหาดำเนินไปได้อย่างรวดเร็ว กรุณากรอกข้อมูลให้ถูกต้องชัดเจน
         หรือแนบรูปภาพระหว่างมีปัญหาเข้ามา</p>
@@ -89,8 +90,8 @@
   <script src="https://unpkg.com/dropzone@5/dist/min/dropzone.min.js"></script>
   <script src="js/vconsole.min.js"></script>
   <script>
-    var vConsole = new VConsole()
-    console.log("Hello World!")
+    //var vConsole = new VConsole()
+    //console.log("Hello World!")
   </script>
 
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -111,18 +112,15 @@
     async function closed() {
       await liff.closeWindow()
     }
-
+   function backstep() {
+      showstep1()
+    }
+  
     function searchproj(e) {
       showloading()
       var inputval = document.getElementById("input_proj").value
-      //alert(inputval)
       if(inputval == "T009"){
-        document.getElementById("input_proj").value = "NT Online Payment"
-        document.getElementById("btn_search_proj").style.display = "none"
-        document.getElementById("hrline1").style.display = "none"
-        document.getElementById("lbl-error").style.display = "none"
-        document.getElementById("input_proj").disabled = true
-        document.getElementById("ticket_info").style.display = "block"
+        showstep2()
         
       }else{
         document.getElementById("lbl-error").style.display = "block"
@@ -132,6 +130,33 @@
       
     }
 
+    function showstep1() {
+        showloading()
+        document.getElementById("input_proj").value = ""
+        document.getElementById("btn_search_proj").style.display = "block"
+        document.getElementById("hrline1").style.display = "block"
+
+        document.getElementById("lbl-error").style.display = "none"
+        document.getElementById("input_proj").disabled = false
+        document.getElementById("ticket_info").style.display = "none"
+        document.getElementById("btnback").classList.add("disabled")
+
+        document.getElementById("upimgGallery").value = ""
+        document.getElementById("ticket_text").value = ""
+        document.getElementById("ticketimg").innerHTML = ""
+
+        
+    }
+    function showstep2() {
+        document.getElementById("input_proj").value = "NT Online Payment"
+        document.getElementById("btn_search_proj").style.display = "none"
+        document.getElementById("hrline1").style.display = "none"
+        document.getElementById("lbl-error").style.display = "none"
+        document.getElementById("input_proj").disabled = true
+        document.getElementById("ticket_info").style.display = "block"
+        document.getElementById("btnback").classList.remove("disabled")
+
+    }
 
     function showloading() {
       document.getElementById("loading").style.display = "block"
@@ -159,7 +184,7 @@
         else {
           var maxfile = document.getElementById("ticketimg").childElementCount;
           if (maxfile < 5) {
-            document.getElementById("ticketimg").innerHTML += "<div class='ticketimg_item'><i class='fa-solid fa-file-lines'></i><span class='img-file-name'>" + fname + "</span><img src='" + URL.createObjectURL(event.target.files[i]) + "'   class='img-ticket-item' style='display:none'><br>(" + fsize / 1000 + "KB)<i class='fa-solid fa-circle-xmark' onclick='removeimg(this)'></i></div>"
+            document.getElementById("ticketimg").innerHTML += "<div class='ticketimg_item'><i class='fa-solid fa-file-lines'></i><a href='" + URL.createObjectURL(event.target.files[i]) + "'><span class='img-file-name'>" + fname + "</span></a><img src='" + URL.createObjectURL(event.target.files[i]) + "'   class='img-ticket-item' style='display:none'><br>(" + fsize / 1000 + "KB)<i class='fa-solid fa-circle-xmark' onclick='removeimg(this)'></i></div>"
           } else {
             alert("สามารถแนบไฟล์ได้สูงสุด 5 ไฟล์")
           }
