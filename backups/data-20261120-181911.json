@@ -1,0 +1,22 @@
+{
+  "minStaff": 1,
+  "members": [
+    {
+      "id": "g9fd5mq",
+      "name": "Bank",
+      "role": "FE",
+      "quota": 7.5
+    }
+  ],
+  "leaves": [
+    {
+      "id": "uuxjpgq",
+      "memberId": "g9fd5mq",
+      "date": "2026-12-23",
+      "span": "am",
+      "status": "pending",
+      "note": ""
+    }
+  ],
+  "savedAt": "2026-11-20T18:19:02"
+}

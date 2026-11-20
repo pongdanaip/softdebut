@@ -1,0 +1,13 @@
+{
+  "minStaff": 1,
+  "members": [
+    {
+      "id": "g9fd5mq",
+      "name": "Bank",
+      "role": "FE",
+      "quota": 7.5
+    }
+  ],
+  "leaves": [],
+  "savedAt": "2026-11-20T18:22:23"
+}

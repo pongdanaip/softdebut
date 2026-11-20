@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ระบบจดวันลาทีมงาน — ธันวาคม 2569</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#fff; --ink:#1d2433; --muted:#6b7488; --line:#e3e7f0;
+    --brand:#3d5afe; --brand-soft:#eaeeff;
+    --ok:#1f9d6b; --ok-soft:#e5f6ef;
+    --warn:#c98a06; --warn-soft:#fdf3dd;
+    --bad:#d34848; --bad-soft:#fdeaea;
+    --holiday:#8b5cf6; --holiday-soft:#f1ebff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Noto Sans Thai","Sarabun","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.55}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 18px 64px}
+  header.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+  h1{font-size:24px;margin:0}
+  h2{font-size:17px;margin:0 0 12px}
+  .sub{color:var(--muted);font-size:13px;margin-top:4px}
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:18px;
+        box-shadow:0 1px 2px rgba(20,30,60,.04)}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea,button{font-family:inherit;font-size:14px}
+  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink)}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+  button{cursor:pointer;border:0;border-radius:9px;padding:9px 14px;background:var(--brand);color:#fff;font-weight:600}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  button.tiny{padding:3px 8px;font-size:12px;font-weight:500}
+  button.danger{background:var(--bad-soft);color:var(--bad)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row>*{flex:1}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+  .storage{font-size:12px;color:var(--muted);margin-top:7px}
+  .storage b{color:var(--ink)}
+  .storage .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+  .storage.ok .dot{background:var(--ok)} .storage.ok{color:var(--ok)}
+  .storage.warn .dot{background:var(--warn)} .storage.warn{color:var(--warn)}
+  .storage.bad .dot{background:var(--bad)} .storage.bad{color:var(--bad)}
+
+  /* members */
+  .member{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed var(--line)}
+  .member:last-child{border-bottom:0}
+  .avatar{width:34px;height:34px;border-radius:50%;flex:0 0 34px;display:grid;place-items:center;
+          color:#fff;font-weight:700;font-size:13px}
+  .m-name{font-weight:600}
+  .m-meta{font-size:12px;color:var(--muted)}
+  .bar{height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--brand)}
+
+  /* calendar */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .dow{text-align:center;font-size:12px;color:var(--muted);padding-bottom:2px}
+  .cell{min-height:92px;border:1px solid var(--line);border-radius:10px;padding:6px;background:#fff;
+        cursor:pointer;position:relative;transition:.12s}
+  .cell.empty{border:0;background:transparent;cursor:default}
+  .cell:hover:not(.empty):not(.off){border-color:var(--brand)}
+  .cell .d{font-weight:700;font-size:13px}
+  .cell .tag{font-size:10px;color:var(--holiday);display:block;line-height:1.3}
+  .cell.off{background:#fafbfe;color:var(--muted);cursor:not-allowed}
+  .cell.holiday{background:var(--holiday-soft)}
+  .cell.sel{outline:2px solid var(--brand);background:var(--brand-soft)}
+  .cell.lv-ok{background:var(--ok-soft)}
+  .cell.lv-warn{background:var(--warn-soft)}
+  .cell.lv-full{background:var(--bad-soft)}
+  .chips{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
+  .chip{font-size:10px;padding:1px 6px;border-radius:20px;color:#fff;max-width:100%;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip.pend{opacity:.45;text-decoration:line-through}
+  .cap{position:absolute;right:6px;top:6px;font-size:10px;color:var(--muted)}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:12px}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:5px;vertical-align:-2px}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  .pill{display:inline-block;font-size:11px;padding:1px 9px;border-radius:20px;font-weight:600}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)}
+  .pill.pend{background:var(--warn-soft);color:var(--warn)}
+  .empty-note{color:var(--muted);font-size:13px;padding:10px 0}
+  .alert{background:var(--bad-soft);color:var(--bad);border-radius:9px;padding:9px 11px;font-size:13px;margin-bottom:10px}
+  .alert.ok{background:var(--ok-soft);color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>ระบบจดวันลาทีมงาน</h1>
+      <div class="sub">ธันวาคม 2569 (December 2026) — จัดสรรวันลาไม่ให้ชนกันจนไม่มีคนทำงาน</div>
+    </div>
+    <div style="flex:0 0 auto;text-align:right">
+      <div id="storageStatus" class="storage">กำลังเชื่อมต่อไฟล์ข้อมูล…</div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- ซ้าย -->
+    <div>
+      <div class="card">
+        <h2>1. ตั้งค่าทีม</h2>
+        <label>ต้องมีคนอยู่ปฏิบัติงานอย่างน้อย (คน/วัน)</label>
+        <input type="number" id="minStaff" min="0" value="2">
+        <div class="hint" id="capHint"></div>
+      </div>
+
+      <div class="card">
+        <h2>2. สร้างโปรไฟล์</h2>
+        <label>ชื่อ–นามสกุล / ชื่อเล่น</label>
+        <input id="mName" placeholder="เช่น สมชาย (ตั้ม)">
+        <div class="row">
+          <div>
+            <label>ตำแหน่ง / หน้าที่</label>
+            <input id="mRole" placeholder="เช่น Dev">
+          </div>
+          <div>
+            <label>วันลาคงเหลือ (วัน)</label>
+            <input type="number" id="mQuota" min="0" step="0.5" value="6">
+          </div>
+        </div>
+        <button id="btnAddMember" style="margin-top:12px;width:100%">+ เพิ่มสมาชิก</button>
+        <div style="margin-top:14px" id="memberList"></div>
+      </div>
+
+      <div class="card">
+        <h2>3. ขอลา</h2>
+        <label>เลือกสมาชิก</label>
+        <select id="selMember"></select>
+        <label>ลักษณะการลา</label>
+        <select id="selSpan">
+          <option value="full">เต็มวัน (1 วัน)</option>
+          <option value="am">ครึ่งวันเช้า (0.5 วัน)</option>
+          <option value="pm">ครึ่งวันบ่าย (0.5 วัน)</option>
+        </select>
+        <label>หมายเหตุ (ถ้ามี)</label>
+        <input id="noteInput" placeholder="เช่น พาลูกไปหาหมอ">
+        <div class="hint">เลือกสมาชิกแล้ว <b>คลิกวันที่ในปฏิทิน</b> เพื่อเลือก/ยกเลิกวันลา (คลิกซ้ำเพื่อเอาออก)</div>
+        <div id="pickInfo" class="hint"></div>
+        <button id="btnSubmit" style="margin-top:10px;width:100%">บันทึกวันลาที่เลือก</button>
+      </div>
+    </div>
+
+    <!-- ขวา -->
+    <div>
+      <div class="card">
+        <h2>ปฏิทินวันลา — ธันวาคม 2569</h2>
+        <div id="alertBox"></div>
+        <div class="cal" id="calHead"></div>
+        <div class="cal" id="cal" style="margin-top:6px"></div>
+        <div class="legend">
+          <span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>ลาได้ ยังเหลือโควตาวัน</span>
+          <span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>เหลือที่ว่างวันละ 1 คน</span>
+          <span><i style="background:var(--bad-soft);border:1px solid var(--bad)"></i>เต็มแล้ว ลาเพิ่มไม่ได้</span>
+          <span><i style="background:var(--holiday-soft);border:1px solid var(--holiday)"></i>วันหยุดนักขัตฤกษ์</span>
+          <span>ตัวเลขมุมขวา = คนที่ลาแล้ว/เพดาน ถ้าเช้ากับบ่ายไม่เท่ากันจะแสดงเป็น “ช · บ”</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>สรุปรายคน</h2>
+        <div id="summary"></div>
+      </div>
+
+      <div class="card">
+        <h2>รายการวันลาทั้งหมด</h2>
+        <div id="leaveList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- ข้อมูลพื้นฐาน ---------- */
+const YEAR = 2026, MONTH = 12;                 // ธันวาคม 2026 (พ.ศ. 2569)
+const HOLIDAYS = {
+  "2026-12-05": "วันชาติ / วันพ่อแห่งชาติ",
+  "2026-12-07": "ชดเชยวันที่ 5 ธ.ค.",
+  "2026-12-10": "วันรัฐธรรมนูญ",
+  "2026-12-31": "วันสิ้นปี"
+};
+const DOW = ["จ","อ","พ","พฤ","ศ","ส","อา"];
+const COLORS = ["#3d5afe","#1f9d6b","#d34848","#c98a06","#8b5cf6","#0ea5e9","#ec4899","#64748b","#15803d","#b45309"];
+const KEY = "leave-planner-dec2026";
+
+let state = { minStaff: 2, members: [], leaves: [] };
+let picked = new Set();   // วันที่กำลังเลือกอยู่ (ยังไม่บันทึก)
+let pendingDel = null;    // โปรไฟล์ที่รอการยืนยันลบ
+
+/* ===== ชั้นเก็บข้อมูล =====
+   โหมด "file"  : มี server.py อยู่ → บันทึกลงไฟล์ data.json จริง (ใช้ร่วมกันได้ทั้งทีม)
+   โหมด "local" : เปิดไฟล์ index.html ตรง ๆ → เก็บในเบราว์เซอร์ แล้วส่งออกเป็นไฟล์เองได้   */
+const API = "/api/data";
+let MODE = "local", saveTimer = null, saving = false, pendingSave = false, lastSavedAt = null;
+
+function loadLocal(){ try { return JSON.parse(localStorage.getItem(KEY)); } catch(e){ return null; } }
+
+async function boot(){
+  try {
+    const r = await fetch(API, { cache:"no-store" });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || "โหลดข้อมูลไม่สำเร็จ");
+    state = Object.assign({ minStaff:2, members:[], leaves:[] }, j.data);
+    lastSavedAt = j.data.savedAt || null;
+    MODE = "file";
+    // ครั้งแรกที่ยังไม่มี data.json แต่เคยใช้งานในเบราว์เซอร์มาก่อน → ย้ายข้อมูลเดิมขึ้นไฟล์ให้
+    const old = loadLocal();
+    if(!state.members.length && old && old.members && old.members.length){
+      state = old; pushToFile();
+    }
+  } catch(e) {
+    state = loadLocal() || state;
+    MODE = "local";
+  }
+  render();
+  setStatus();
+}
+
+function save(){
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){}   // สำเนากันเหนียว
+  if(MODE !== "file") { setStatus(); return; }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(pushToFile, 400);          // รวบการแก้หลายครั้งให้เขียนไฟล์ครั้งเดียว
+  setStatus("saving");
+}
+
+async function pushToFile(){
+  if(saving){ pendingSave = true; return; }
+  saving = true;
+  try {
+    const r = await fetch(API, { method:"PUT", headers:{"Content-Type":"application/json"},
+                                 body: JSON.stringify(state) });
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error);
+    lastSavedAt = j.savedAt;
+    setStatus();
+  } catch(e) {
+    setStatus("error", e.message);
+  } finally {
+    saving = false;
+    if(pendingSave){ pendingSave = false; pushToFile(); }
+  }
+}
+
+function setStatus(kind, msg){
+  const el = document.getElementById("storageStatus"); if(!el) return;
+  if(MODE !== "file"){
+    el.className = "storage warn";
+    el.innerHTML = `<i class="dot"></i>เก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — รัน <b>server.py</b> แล้วเปิดผ่าน localhost เพื่อให้บันทึกลงไฟล์ data.json`;
+    return;
+  }
+  if(kind === "saving"){ el.className = "storage"; el.innerHTML = `<i class="dot" style="background:var(--muted)"></i>กำลังบันทึกลงไฟล์…`; return; }
+  if(kind === "error"){ el.className = "storage bad"; el.innerHTML = `<i class="dot"></i>บันทึกไม่สำเร็จ: ${esc(msg||"")} — ข้อมูลยังอยู่ในเบราว์เซอร์`; return; }
+  const t = lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",second:"2-digit"}) : "—";
+  el.className = "storage ok";
+  el.innerHTML = `<i class="dot"></i>บันทึกลงไฟล์ <b>data.json</b> แล้ว เมื่อ ${t}`;
+}
+function uid(){ return Math.random().toString(36).slice(2,9); }
+const pad = n => String(n).padStart(2,"0");
+const round5 = n => Math.round(n*2)/2;   // ปัดเป็นครึ่งวัน กันเลขทศนิยมเพี้ยน
+const ymd = d => `${YEAR}-${pad(MONTH)}-${pad(d)}`;
+const dayNum = s => Number(s.slice(-2));
+function dowIndex(d){ const js = new Date(YEAR, MONTH-1, d).getDay(); return (js+6)%7; } // 0=จันทร์
+const isWeekend = d => dowIndex(d) >= 5;
+const isHoliday = d => !!HOLIDAYS[ymd(d)];
+const isWorkday = d => !isWeekend(d) && !isHoliday(d);
+const memberById = id => state.members.find(m => m.id === id);
+const colorOf = m => COLORS[state.members.indexOf(m) % COLORS.length];
+
+/* ครึ่งวัน: full = ทั้งวัน, am = ครึ่งเช้า, pm = ครึ่งบ่าย */
+const SPAN = { full:{label:"เต็มวัน", short:"", w:1}, am:{label:"ครึ่งเช้า", short:"เช้า", w:.5}, pm:{label:"ครึ่งบ่าย", short:"บ่าย", w:.5} };
+const spanOf = l => SPAN[l.span] ? l.span : "full";
+const weightOf = l => SPAN[spanOf(l)].w;
+const coversAM = l => spanOf(l)!=="pm";
+const coversPM = l => spanOf(l)!=="am";
+
+/* จำนวนคนที่ลาพร้อมกันได้สูงสุด/วัน */
+function capacity(){ return Math.max(0, state.members.length - Number(state.minStaff||0)); }
+function approvedOn(date){ return state.leaves.filter(l => l.date===date && l.status==="approved"); }
+function leavesOn(date){ return state.leaves.filter(l => l.date===date); }
+function usedDays(id){
+  return state.leaves.filter(l => l.memberId===id && l.status==="approved")
+                     .reduce((s,l)=>s+weightOf(l), 0);
+}
+/* จำนวนคนที่ลาอยู่ในแต่ละครึ่งวัน (นับคน ไม่ใช่นับวัน) */
+function slotCounts(date){
+  const ap = approvedOn(date);
+  return { am: ap.filter(coversAM).length, pm: ap.filter(coversPM).length };
+}
+/* ลาช่วงนี้ได้ไหม โดยดูว่าครึ่งวันที่ทับกันยังไม่เต็ม */
+function slotFree(date, span){
+  const c = slotCounts(date), cap = capacity();
+  if(span!=="pm" && c.am >= cap) return false;
+  if(span!=="am" && c.pm >= cap) return false;
+  return true;
+}
+/* ใครจองครึ่งวันที่ชนกันไว้ก่อน */
+function blockers(date, span){
+  return approvedOn(date)
+    .filter(l => (span!=="pm" && coversAM(l)) || (span!=="am" && coversPM(l)))
+    .map(l => { const m = memberById(l.memberId); return m ? m.name + (spanOf(l)==="full"?"":" ("+SPAN[spanOf(l)].short+")") : ""; })
+    .filter(Boolean).join(", ");
+}
+/* คนเดิมลาวันเดียวกันซ้ำช่วงกันหรือไม่ */
+function overlapsOwn(memberId, date, span){
+  return state.leaves.some(l => l.memberId===memberId && l.date===date &&
+    ((span!=="pm" && coversAM(l)) || (span!=="am" && coversPM(l))));
+}
+
+/* ---------- เรนเดอร์ ---------- */
+function render(){
+  document.getElementById("minStaff").value = state.minStaff;
+  document.getElementById("capHint").innerHTML =
+    `ทีมมี <b>${state.members.length}</b> คน → ลาพร้อมกันได้สูงสุด <b>${capacity()}</b> คน/วัน`;
+  renderMembers(); renderSelect(); renderCalendar(); renderSummary(); renderLeaves(); renderPickInfo();
+  save();
+}
+
+function renderMembers(){
+  const box = document.getElementById("memberList");
+  if(!state.members.length){ box.innerHTML = '<div class="empty-note">ยังไม่มีสมาชิก เพิ่มคนแรกได้เลย</div>'; return; }
+  box.innerHTML = state.members.map(m => {
+    const used = usedDays(m.id), pct = m.quota ? Math.min(100, used/m.quota*100) : 0;
+    return `<div class="member">
+      <div class="avatar" style="background:${colorOf(m)}">${m.name.trim().charAt(0)||"?"}</div>
+      <div style="flex:1;min-width:0">
+        <div class="m-name">${esc(m.name)}</div>
+        <div class="m-meta">${esc(m.role||"-")} · ใช้ไป ${used}/${m.quota} วัน · เหลือ <b>${round5(m.quota-used)}</b> วัน</div>
+        <div class="bar"><i style="width:${pct}%;background:${colorOf(m)}"></i></div>
+      </div>
+      ${pendingDel === m.id
+        ? `<div style="flex:0 0 auto;text-align:right">
+             <div style="font-size:11px;color:var(--bad);margin-bottom:3px">ลบพร้อมวันลาทั้งหมด?</div>
+             <button class="tiny danger" onclick="confirmDelMember('${m.id}')">ยืนยันลบ</button>
+             <button class="tiny ghost" onclick="cancelDel()">ยกเลิก</button>
+           </div>`
+        : `<button class="tiny danger" onclick="askDelMember('${m.id}')">ลบ</button>`}
+    </div>`;
+  }).join("");
+}
+
+function renderSelect(){
+  const sel = document.getElementById("selMember"), cur = sel.value;
+  sel.innerHTML = state.members.length
+    ? state.members.map(m=>`<option value="${m.id}">${esc(m.name)} (เหลือ ${m.quota-usedDays(m.id)} วัน)</option>`).join("")
+    : '<option value="">— ยังไม่มีสมาชิก —</option>';
+  if(cur && state.members.some(m=>m.id===cur)) sel.value = cur;
+}
+
+function renderCalendar(){
+  document.getElementById("calHead").innerHTML = DOW.map(d=>`<div class="dow">${d}</div>`).join("");
+  const last = new Date(YEAR, MONTH, 0).getDate();
+  const lead = dowIndex(1);
+  let html = "";
+  for(let i=0;i<lead;i++) html += '<div class="cell empty"></div>';
+  const cap = capacity();
+  const curSpan = document.getElementById("selSpan")?.value || "full";
+  for(let d=1; d<=last; d++){
+    const date = ymd(d), ls = leavesOn(date), c = slotCounts(date), peak = Math.max(c.am, c.pm);
+    let cls = "cell";
+    if(!isWorkday(d)) cls += " off";
+    if(isHoliday(d)) cls += " holiday";
+    if(isWorkday(d) && peak>0){
+      cls += !slotFree(date, curSpan) ? " lv-full" : (cap-peak<=1 ? " lv-warn" : " lv-ok");
+    }
+    if(picked.has(date)) cls += " sel";
+    const chips = ls.map(l=>{
+      const m = memberById(l.memberId); if(!m) return "";
+      const sp = SPAN[spanOf(l)].short;
+      return `<span class="chip ${l.status==='approved'?'':'pend'}" style="background:${colorOf(m)}" title="${esc(m.name)} — ${SPAN[spanOf(l)].label}${l.note?' — '+esc(l.note):''}">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
+    }).join("");
+    const capTxt = (c.am===c.pm) ? `${c.am}/${cap}` : `ช ${c.am} · บ ${c.pm}`;
+    html += `<div class="${cls}" data-d="${d}" onclick="togglePick(${d})">
+      <div class="d">${d}</div>
+      ${isHoliday(d)?`<span class="tag">${HOLIDAYS[date]}</span>`:""}
+      ${isWorkday(d)&&cap>0?`<span class="cap">${capTxt}</span>`:""}
+      <div class="chips">${chips}</div>
+    </div>`;
+  }
+  document.getElementById("cal").innerHTML = html;
+}
+
+function renderSummary(){
+  const box = document.getElementById("summary");
+  if(!state.members.length){ box.innerHTML = '<div class="empty-note">—</div>'; return; }
+  box.innerHTML = `<table><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>โควตา</th><th>ลาแล้ว</th><th>คงเหลือ</th><th>วันที่ลา (ธ.ค.)</th></tr>` +
+    state.members.map(m=>{
+      const used = usedDays(m.id);
+      const days = state.leaves.filter(l=>l.memberId===m.id&&l.status==="approved")
+                    .sort((a,b)=>a.date.localeCompare(b.date))
+                    .map(l=>{ const sp=SPAN[spanOf(l)].short; return dayNum(l.date)+(sp?` (${sp})`:""); });
+      return `<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.role||"-")}</td><td>${m.quota}</td>
+        <td>${used}</td><td><b>${round5(m.quota-used)}</b></td>
+        <td>${days.length?days.join(", "):"<span style='color:var(--muted)'>ยังไม่ลา</span>"}</td></tr>`;
+    }).join("") + `</table>`;
+}
+
+function renderLeaves(){
+  const box = document.getElementById("leaveList");
+  const ls = [...state.leaves].sort((a,b)=>a.date.localeCompare(b.date));
+  if(!ls.length){ box.innerHTML = '<div class="empty-note">ยังไม่มีการจดวันลา</div>'; return; }
+  box.innerHTML = `<table><tr><th>วันที่</th><th>ช่วง</th><th>ชื่อ</th><th>สถานะ</th><th>หมายเหตุ</th><th></th></tr>` +
+    ls.map(l=>{
+      const m = memberById(l.memberId); if(!m) return "";
+      const d = dayNum(l.date);
+      return `<tr>
+        <td>${d} ธ.ค. (${DOW[dowIndex(d)]})</td>
+        <td>${SPAN[spanOf(l)].label} <span style="color:var(--muted)">${weightOf(l)} วัน</span></td>
+        <td><b>${esc(m.name)}</b></td>
+        <td>${l.status==="approved"
+              ? '<span class="pill ok">จัดสรรแล้ว</span>'
+              : '<span class="pill pend">รอคิว — วันนั้นเต็ม</span>'}</td>
+        <td>${esc(l.note||"-")}</td>
+        <td style="text-align:right">
+          ${l.status==="pending"?`<button class="tiny ghost" onclick="tryApprove('${l.id}')">ลองจัดสรร</button> `:""}
+          <button class="tiny danger" onclick="delLeave('${l.id}')">ยกเลิก</button></td>
+      </tr>`;
+    }).join("") + `</table>`;
+}
+
+function renderPickInfo(){
+  const el = document.getElementById("pickInfo");
+  const arr = [...picked].sort();
+  const sp = document.getElementById("selSpan").value;
+  el.innerHTML = arr.length
+    ? `เลือกไว้ ${arr.map(dayNum).join(", ")} ธ.ค. · ${SPAN[sp].label} · รวม <b>${round5(arr.length*SPAN[sp].w)}</b> วัน`
+    : "ยังไม่ได้เลือกวัน";
+}
+
+/* ---------- การกระทำ ---------- */
+function togglePick(d){
+  const date = ymd(d);
+  if(!isWorkday(d)){ return showAlert(isHoliday(d)
+      ? `วันที่ ${d} ธ.ค. เป็นวันหยุด (${HOLIDAYS[date]}) ไม่ต้องใช้วันลา`
+      : `วันที่ ${d} ธ.ค. เป็นวันหยุดสุดสัปดาห์ ไม่ต้องใช้วันลา`); }
+  if(!document.getElementById("selMember").value){ return showAlert("เลือกสมาชิกก่อน แล้วค่อยคลิกวันที่ในปฏิทิน"); }
+  picked.has(date) ? picked.delete(date) : picked.add(date);
+  renderCalendar(); renderPickInfo();
+}
+
+function submitLeave(){
+  const id = document.getElementById("selMember").value;
+  const m = memberById(id);
+  if(!m) return showAlert("ยังไม่มีสมาชิก — สร้างโปรไฟล์ก่อน");
+  if(!picked.size) return showAlert("ยังไม่ได้เลือกวันลาในปฏิทิน");
+  const note = document.getElementById("noteInput").value.trim();
+  const span = document.getElementById("selSpan").value;
+  const w = SPAN[span].w, spLabel = SPAN[span].label;
+  const dates = [...picked].sort();
+  let remain = m.quota - usedDays(m.id);
+  const msgs = [];
+  for(const date of dates){
+    if(overlapsOwn(id, date, span)){ msgs.push(`${dayNum(date)} ธ.ค.: จดช่วงที่ทับกันไว้แล้ว`); continue; }
+    let status = "approved";
+    if(remain < w){ status="pending"; msgs.push(`${dayNum(date)} ธ.ค. (${spLabel}): วันลาคงเหลือไม่พอ → เข้าคิวรอ`); }
+    else if(!slotFree(date, span)){
+      status="pending";
+      msgs.push(`${dayNum(date)} ธ.ค. (${spLabel}): ช่วงนี้เต็มแล้ว (${blockers(date, span)}) → เข้าคิวรอ`);
+    } else remain = round5(remain - w);
+    state.leaves.push({ id:uid(), memberId:id, date, span, status, note });
+  }
+  picked.clear();
+  document.getElementById("noteInput").value = "";
+  showAlert(msgs.length ? "บันทึกแล้ว แต่มีบางวันจัดสรรไม่ได้:<br>• " + msgs.join("<br>• ")
+                        : "บันทึกวันลาเรียบร้อย จัดสรรได้ทุกวันที่เลือก", msgs.length ? "" : "ok");
+  render();
+}
+
+function tryApprove(lid){
+  const l = state.leaves.find(x=>x.id===lid); if(!l) return;
+  const m = memberById(l.memberId), span = spanOf(l);
+  if(m.quota - usedDays(m.id) < SPAN[span].w) return showAlert("วันลาคงเหลือของ " + esc(m.name) + " ไม่พอ");
+  if(!slotFree(l.date, span)) return showAlert(`วันที่ ${dayNum(l.date)} ธ.ค. ช่วง${SPAN[span].label}ยังเต็มอยู่ — ต้องมีคนยกเลิกก่อน`);
+  l.status = "approved"; showAlert("จัดสรรให้แล้ว", "ok"); render();
+}
+
+function delLeave(lid){
+  const l = state.leaves.find(x=>x.id===lid);
+  state.leaves = state.leaves.filter(x=>x.id!==lid);
+  if(l){ const m = memberById(l.memberId);
+    showAlert(`ยกเลิกวันลา ${dayNum(l.date)} ธ.ค. ของ ${esc(m?m.name:"")} แล้ว`, "ok"); }
+  render();
+}
+
+/* ลบโปรไฟล์: ยืนยันด้วยปุ่มในหน้าเว็บ (ไม่ใช้กล่อง confirm ของเบราว์เซอร์
+   เพราะบางหน้าต่าง เช่น พรีวิวในแอป จะไม่แสดงกล่องนั้นให้) */
+function askDelMember(id){ pendingDel = id; renderMembers(); }
+function cancelDel(){ pendingDel = null; renderMembers(); }
+function confirmDelMember(id){
+  const m = memberById(id); if(!m) return;
+  const n = state.leaves.filter(l=>l.memberId===id).length;
+  state.members = state.members.filter(x=>x.id!==id);
+  state.leaves = state.leaves.filter(l=>l.memberId!==id);
+  pendingDel = null;
+  showAlert(`ลบโปรไฟล์ <b>${esc(m.name)}</b> แล้ว${n?` พร้อมวันลา ${n} รายการ`:""}`, "ok");
+  render();
+}
+
+let alertTimer = null;
+function showAlert(html, kind){
+  const b = document.getElementById("alertBox");
+  b.innerHTML = `<div class="alert ${kind||""}">${html}</div>`;
+  clearTimeout(alertTimer);          // กันข้อความใหม่ถูกตัวตั้งเวลาของข้อความเก่าล้าง
+  alertTimer = setTimeout(()=>{ b.innerHTML = ""; }, 9000);
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ---------- เหตุการณ์ ---------- */
+document.getElementById("btnAddMember").onclick = ()=>{
+  const name = document.getElementById("mName").value.trim();
+  if(!name) return showAlert("กรอกชื่อก่อนครับ");
+  const quota = Math.max(0, Number(document.getElementById("mQuota").value)||0);
+  state.members.push({ id:uid(), name, role:document.getElementById("mRole").value.trim(), quota });
+  document.getElementById("mName").value=""; document.getElementById("mRole").value="";
+  render();
+};
+document.getElementById("minStaff").onchange = e=>{ state.minStaff = Math.max(0, Number(e.target.value)||0); render(); };
+document.getElementById("btnSubmit").onclick = submitLeave;
+document.getElementById("selMember").onchange = ()=>{ picked.clear(); renderCalendar(); renderPickInfo(); };
+document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPickInfo(); };
+
+/* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
+   ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
+
+window.togglePick = togglePick; window.delLeave = delLeave; window.tryApprove = tryApprove;
+window.askDelMember = askDelMember; window.confirmDelMember = confirmDelMember; window.cancelDel = cancelDel;
+
+/* เตือนถ้าปิดหน้าขณะยังบันทึกไฟล์ไม่เสร็จ */
+window.addEventListener("beforeunload", e=>{
+  if(MODE==="file" && (saving || saveTimer && pendingSave)){ e.preventDefault(); e.returnValue=""; }
+});
+
+boot();
+</script>
+</body>
+</html>
