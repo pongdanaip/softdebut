@@ -1,2 +1,0 @@
-# softdebut
-Softdebut Line OA
