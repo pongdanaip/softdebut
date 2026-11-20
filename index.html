@@ -104,14 +104,7 @@
     <!-- ซ้าย -->
     <div>
       <div class="card">
-        <h2>1. ตั้งค่าทีม</h2>
-        <label>ต้องมีคนอยู่ปฏิบัติงานอย่างน้อย (คน/วัน)</label>
-        <input type="number" id="minStaff" min="0" value="2">
-        <div class="hint" id="capHint"></div>
-      </div>
-
-      <div class="card">
-        <h2>2. สร้างโปรไฟล์</h2>
+        <h2>1. สร้างโปรไฟล์</h2>
         <label>ชื่อ–นามสกุล / ชื่อเล่น</label>
         <input id="mName" placeholder="เช่น สมชาย (ตั้ม)">
         <div class="row">
@@ -129,7 +122,7 @@
       </div>
 
       <div class="card">
-        <h2>3. ขอลา</h2>
+        <h2>2. ขอลา</h2>
         <label>เลือกสมาชิก</label>
         <select id="selMember"></select>
         <label>ลักษณะการลา</label>
@@ -154,12 +147,17 @@
         <div class="cal" id="calHead"></div>
         <div class="cal" id="cal" style="margin-top:6px"></div>
         <div class="legend">
-          <span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>ลาได้ ยังเหลือโควตาวัน</span>
-          <span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>เหลือที่ว่างวันละ 1 คน</span>
-          <span><i style="background:var(--bad-soft);border:1px solid var(--bad)"></i>เต็มแล้ว ลาเพิ่มไม่ได้</span>
+          <span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>มีคนลา 1 คน</span>
+          <span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>ลาซ้อนกัน 2 คน</span>
+          <span><i style="background:var(--bad-soft);border:1px solid var(--bad)"></i>ลาซ้อนกันตั้งแต่ 3 คน</span>
           <span><i style="background:var(--holiday-soft);border:1px solid var(--holiday)"></i>วันหยุดนักขัตฤกษ์</span>
-          <span>ตัวเลขมุมขวา = คนที่ลาแล้ว/เพดาน ถ้าเช้ากับบ่ายไม่เท่ากันจะแสดงเป็น “ช · บ”</span>
+          <span>ตัวเลขมุมขวา = จำนวนคนลาวันนั้น ถ้าเช้ากับบ่ายไม่เท่ากันจะแสดงเป็น “ช · บ”</span>
         </div>
+      </div>
+
+      <div class="card">
+        <h2>วันที่ลาซ้อนกัน</h2>
+        <div id="conflicts"></div>
       </div>
 
       <div class="card">
@@ -188,7 +186,7 @@ const DOW = ["จ","อ","พ","พฤ","ศ","ส","อา"];
 const COLORS = ["#3d5afe","#1f9d6b","#d34848","#c98a06","#8b5cf6","#0ea5e9","#ec4899","#64748b","#15803d","#b45309"];
 const KEY = "leave-planner-dec2026";
 
-let state = { minStaff: 2, members: [], leaves: [] };
+let state = { members: [], leaves: [] };
 let picked = new Set();   // วันที่กำลังเลือกอยู่ (ยังไม่บันทึก)
 let pendingDel = null;    // โปรไฟล์ที่รอการยืนยันลบ
 
@@ -206,7 +204,7 @@ async function boot(){
     if(!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
     if(!j.ok) throw new Error(j.error || "โหลดข้อมูลไม่สำเร็จ");
-    state = Object.assign({ minStaff:2, members:[], leaves:[] }, j.data);
+    state = Object.assign({ members:[], leaves:[] }, j.data);
     lastSavedAt = j.data.savedAt || null;
     MODE = "file";
     // ครั้งแรกที่ยังไม่มี data.json แต่เคยใช้งานในเบราว์เซอร์มาก่อน → ย้ายข้อมูลเดิมขึ้นไฟล์ให้
@@ -280,32 +278,25 @@ const weightOf = l => SPAN[spanOf(l)].w;
 const coversAM = l => spanOf(l)!=="pm";
 const coversPM = l => spanOf(l)!=="am";
 
-/* จำนวนคนที่ลาพร้อมกันได้สูงสุด/วัน */
-function capacity(){ return Math.max(0, state.members.length - Number(state.minStaff||0)); }
-function approvedOn(date){ return state.leaves.filter(l => l.date===date && l.status==="approved"); }
 function leavesOn(date){ return state.leaves.filter(l => l.date===date); }
 function usedDays(id){
-  return state.leaves.filter(l => l.memberId===id && l.status==="approved")
-                     .reduce((s,l)=>s+weightOf(l), 0);
+  return state.leaves.filter(l => l.memberId===id).reduce((s,l)=>s+weightOf(l), 0);
 }
 /* จำนวนคนที่ลาอยู่ในแต่ละครึ่งวัน (นับคน ไม่ใช่นับวัน) */
 function slotCounts(date){
-  const ap = approvedOn(date);
-  return { am: ap.filter(coversAM).length, pm: ap.filter(coversPM).length };
+  const ls = leavesOn(date);
+  return { am: ls.filter(coversAM).length, pm: ls.filter(coversPM).length };
 }
-/* ลาช่วงนี้ได้ไหม โดยดูว่าครึ่งวันที่ทับกันยังไม่เต็ม */
-function slotFree(date, span){
-  const c = slotCounts(date), cap = capacity();
-  if(span!=="pm" && c.am >= cap) return false;
-  if(span!=="am" && c.pm >= cap) return false;
-  return true;
-}
-/* ใครจองครึ่งวันที่ชนกันไว้ก่อน */
-function blockers(date, span){
-  return approvedOn(date)
+/* ลาซ้อนกันกี่คนในวันนั้น (ดูช่วงที่คนเยอะสุด) */
+function peakOn(date){ const c = slotCounts(date); return Math.max(c.am, c.pm); }
+
+/* ใครลาอยู่แล้วในช่วงที่ทับกับช่วงนี้ — ใช้เตือน ไม่ได้ใช้บล็อก */
+function othersOn(date, span, exceptMemberId){
+  return leavesOn(date)
+    .filter(l => l.memberId !== exceptMemberId)
     .filter(l => (span!=="pm" && coversAM(l)) || (span!=="am" && coversPM(l)))
     .map(l => { const m = memberById(l.memberId); return m ? m.name + (spanOf(l)==="full"?"":" ("+SPAN[spanOf(l)].short+")") : ""; })
-    .filter(Boolean).join(", ");
+    .filter(Boolean);
 }
 /* คนเดิมลาวันเดียวกันซ้ำช่วงกันหรือไม่ */
 function overlapsOwn(memberId, date, span){
@@ -315,10 +306,8 @@ function overlapsOwn(memberId, date, span){
 
 /* ---------- เรนเดอร์ ---------- */
 function render(){
-  document.getElementById("minStaff").value = state.minStaff;
-  document.getElementById("capHint").innerHTML =
-    `ทีมมี <b>${state.members.length}</b> คน → ลาพร้อมกันได้สูงสุด <b>${capacity()}</b> คน/วัน`;
-  renderMembers(); renderSelect(); renderCalendar(); renderSummary(); renderLeaves(); renderPickInfo();
+  renderMembers(); renderSelect(); renderCalendar(); renderConflicts();
+  renderSummary(); renderLeaves(); renderPickInfo();
   save();
 }
 
@@ -359,31 +348,52 @@ function renderCalendar(){
   const lead = dowIndex(1);
   let html = "";
   for(let i=0;i<lead;i++) html += '<div class="cell empty"></div>';
-  const cap = capacity();
-  const curSpan = document.getElementById("selSpan")?.value || "full";
   for(let d=1; d<=last; d++){
     const date = ymd(d), ls = leavesOn(date), c = slotCounts(date), peak = Math.max(c.am, c.pm);
     let cls = "cell";
     if(!isWorkday(d)) cls += " off";
     if(isHoliday(d)) cls += " holiday";
-    if(isWorkday(d) && peak>0){
-      cls += !slotFree(date, curSpan) ? " lv-full" : (cap-peak<=1 ? " lv-warn" : " lv-ok");
-    }
+    // สีบอกความหนาแน่นของการลา ไม่ได้บล็อกการลา
+    if(isWorkday(d) && peak>0) cls += peak>=3 ? " lv-full" : (peak===2 ? " lv-warn" : " lv-ok");
     if(picked.has(date)) cls += " sel";
     const chips = ls.map(l=>{
       const m = memberById(l.memberId); if(!m) return "";
       const sp = SPAN[spanOf(l)].short;
-      return `<span class="chip ${l.status==='approved'?'':'pend'}" style="background:${colorOf(m)}" title="${esc(m.name)} — ${SPAN[spanOf(l)].label}${l.note?' — '+esc(l.note):''}">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
+      return `<span class="chip" style="background:${colorOf(m)}" title="${esc(m.name)} — ${SPAN[spanOf(l)].label}${l.note?' — '+esc(l.note):''}">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
     }).join("");
-    const capTxt = (c.am===c.pm) ? `${c.am}/${cap}` : `ช ${c.am} · บ ${c.pm}`;
+    const cntTxt = (c.am===c.pm) ? `${c.am} คน` : `ช ${c.am} · บ ${c.pm}`;
     html += `<div class="${cls}" data-d="${d}" onclick="togglePick(${d})">
       <div class="d">${d}</div>
       ${isHoliday(d)?`<span class="tag">${HOLIDAYS[date]}</span>`:""}
-      ${isWorkday(d)&&cap>0?`<span class="cap">${capTxt}</span>`:""}
+      ${isWorkday(d)&&peak>0?`<span class="cap">${cntTxt}</span>`:""}
       <div class="chips">${chips}</div>
     </div>`;
   }
   document.getElementById("cal").innerHTML = html;
+}
+
+/* วันที่มีคนลาตั้งแต่ 2 คนขึ้นไปในช่วงเดียวกัน — เตือนไว้ให้ดูเอง ระบบไม่บล็อก */
+function renderConflicts(){
+  const box = document.getElementById("conflicts");
+  const last = new Date(YEAR, MONTH, 0).getDate();
+  const rows = [];
+  for(let d=1; d<=last; d++){
+    if(!isWorkday(d)) continue;
+    const date = ymd(d), c = slotCounts(date);
+    if(Math.max(c.am, c.pm) < 2) continue;
+    const who = leavesOn(date).map(l=>{
+      const m = memberById(l.memberId); if(!m) return "";
+      const sp = SPAN[spanOf(l)].short;
+      return `<span class="pill" style="background:${colorOf(m)};color:#fff">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
+    }).filter(Boolean).join(" ");
+    const detail = (c.am===c.pm) ? `${c.am} คน` : `เช้า ${c.am} คน · บ่าย ${c.pm} คน`;
+    rows.push(`<tr><td style="white-space:nowrap">${d} ธ.ค. (${DOW[dowIndex(d)]})</td>
+      <td style="white-space:nowrap">${detail}</td><td>${who}</td></tr>`);
+  }
+  box.innerHTML = rows.length
+    ? `<table><tr><th>วันที่</th><th>ลาซ้อนกัน</th><th>ใครบ้าง</th></tr>${rows.join("")}</table>
+       <div class="hint">ระบบไม่ได้ห้ามลาวันเหล่านี้ แค่แจ้งให้ทีมตกลงกันเองว่าจะให้ใครเลื่อน</div>`
+    : '<div class="empty-note">ยังไม่มีวันไหนที่ลาซ้อนกัน</div>';
 }
 
 function renderSummary(){
@@ -392,11 +402,12 @@ function renderSummary(){
   box.innerHTML = `<table><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>โควตา</th><th>ลาแล้ว</th><th>คงเหลือ</th><th>วันที่ลา (ธ.ค.)</th></tr>` +
     state.members.map(m=>{
       const used = usedDays(m.id);
-      const days = state.leaves.filter(l=>l.memberId===m.id&&l.status==="approved")
+      const days = state.leaves.filter(l=>l.memberId===m.id)
                     .sort((a,b)=>a.date.localeCompare(b.date))
                     .map(l=>{ const sp=SPAN[spanOf(l)].short; return dayNum(l.date)+(sp?` (${sp})`:""); });
+      const left = round5(m.quota-used);
       return `<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.role||"-")}</td><td>${m.quota}</td>
-        <td>${used}</td><td><b>${round5(m.quota-used)}</b></td>
+        <td>${used}</td><td><b style="${left<0?"color:var(--bad)":""}">${left}</b>${left<0?' <span class="pill pend">เกินโควตา</span>':""}</td>
         <td>${days.length?days.join(", "):"<span style='color:var(--muted)'>ยังไม่ลา</span>"}</td></tr>`;
     }).join("") + `</table>`;
 }
@@ -405,20 +416,20 @@ function renderLeaves(){
   const box = document.getElementById("leaveList");
   const ls = [...state.leaves].sort((a,b)=>a.date.localeCompare(b.date));
   if(!ls.length){ box.innerHTML = '<div class="empty-note">ยังไม่มีการจดวันลา</div>'; return; }
-  box.innerHTML = `<table><tr><th>วันที่</th><th>ช่วง</th><th>ชื่อ</th><th>สถานะ</th><th>หมายเหตุ</th><th></th></tr>` +
+  box.innerHTML = `<table><tr><th>วันที่</th><th>ช่วง</th><th>ชื่อ</th><th>ลาพร้อมกับ</th><th>หมายเหตุ</th><th></th></tr>` +
     ls.map(l=>{
       const m = memberById(l.memberId); if(!m) return "";
       const d = dayNum(l.date);
+      const others = othersOn(l.date, spanOf(l), l.memberId);
       return `<tr>
         <td>${d} ธ.ค. (${DOW[dowIndex(d)]})</td>
         <td>${SPAN[spanOf(l)].label} <span style="color:var(--muted)">${weightOf(l)} วัน</span></td>
         <td><b>${esc(m.name)}</b></td>
-        <td>${l.status==="approved"
-              ? '<span class="pill ok">จัดสรรแล้ว</span>'
-              : '<span class="pill pend">รอคิว — วันนั้นเต็ม</span>'}</td>
+        <td>${others.length
+              ? `<span class="pill pend">${esc(others.join(", "))}</span>`
+              : '<span style="color:var(--muted)">—</span>'}</td>
         <td>${esc(l.note||"-")}</td>
         <td style="text-align:right">
-          ${l.status==="pending"?`<button class="tiny ghost" onclick="tryApprove('${l.id}')">ลองจัดสรร</button> `:""}
           <button class="tiny danger" onclick="delLeave('${l.id}')">ยกเลิก</button></td>
       </tr>`;
     }).join("") + `</table>`;
@@ -454,30 +465,22 @@ function submitLeave(){
   const w = SPAN[span].w, spLabel = SPAN[span].label;
   const dates = [...picked].sort();
   let remain = m.quota - usedDays(m.id);
-  const msgs = [];
+  const warn = [], added = [];
   for(const date of dates){
-    if(overlapsOwn(id, date, span)){ msgs.push(`${dayNum(date)} ธ.ค.: จดช่วงที่ทับกันไว้แล้ว`); continue; }
-    let status = "approved";
-    if(remain < w){ status="pending"; msgs.push(`${dayNum(date)} ธ.ค. (${spLabel}): วันลาคงเหลือไม่พอ → เข้าคิวรอ`); }
-    else if(!slotFree(date, span)){
-      status="pending";
-      msgs.push(`${dayNum(date)} ธ.ค. (${spLabel}): ช่วงนี้เต็มแล้ว (${blockers(date, span)}) → เข้าคิวรอ`);
-    } else remain = round5(remain - w);
-    state.leaves.push({ id:uid(), memberId:id, date, span, status, note });
+    if(overlapsOwn(id, date, span)){ warn.push(`${dayNum(date)} ธ.ค.: จดช่วงที่ทับกันไว้แล้ว ข้ามให้`); continue; }
+    const others = othersOn(date, span, id);
+    if(others.length) warn.push(`${dayNum(date)} ธ.ค. (${spLabel}): ลาซ้อนกับ ${esc(others.join(", "))}`);
+    remain = round5(remain - w);
+    if(remain < 0) warn.push(`${dayNum(date)} ธ.ค.: ใช้วันลาเกินโควตาของ ${esc(m.name)} แล้ว`);
+    state.leaves.push({ id:uid(), memberId:id, date, span, note });
+    added.push(dayNum(date));
   }
   picked.clear();
   document.getElementById("noteInput").value = "";
-  showAlert(msgs.length ? "บันทึกแล้ว แต่มีบางวันจัดสรรไม่ได้:<br>• " + msgs.join("<br>• ")
-                        : "บันทึกวันลาเรียบร้อย จัดสรรได้ทุกวันที่เลือก", msgs.length ? "" : "ok");
+  const head = added.length ? `บันทึกวันลา ${added.join(", ")} ธ.ค. (${spLabel}) แล้ว` : "ไม่มีวันที่บันทึกเพิ่ม";
+  showAlert(warn.length ? `${head}<br>⚠ ข้อควรระวัง:<br>• ${warn.join("<br>• ")}` : head,
+            warn.length ? "" : "ok");
   render();
-}
-
-function tryApprove(lid){
-  const l = state.leaves.find(x=>x.id===lid); if(!l) return;
-  const m = memberById(l.memberId), span = spanOf(l);
-  if(m.quota - usedDays(m.id) < SPAN[span].w) return showAlert("วันลาคงเหลือของ " + esc(m.name) + " ไม่พอ");
-  if(!slotFree(l.date, span)) return showAlert(`วันที่ ${dayNum(l.date)} ธ.ค. ช่วง${SPAN[span].label}ยังเต็มอยู่ — ต้องมีคนยกเลิกก่อน`);
-  l.status = "approved"; showAlert("จัดสรรให้แล้ว", "ok"); render();
 }
 
 function delLeave(lid){
@@ -520,7 +523,6 @@ document.getElementById("btnAddMember").onclick = ()=>{
   document.getElementById("mName").value=""; document.getElementById("mRole").value="";
   render();
 };
-document.getElementById("minStaff").onchange = e=>{ state.minStaff = Math.max(0, Number(e.target.value)||0); render(); };
 document.getElementById("btnSubmit").onclick = submitLeave;
 document.getElementById("selMember").onchange = ()=>{ picked.clear(); renderCalendar(); renderPickInfo(); };
 document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPickInfo(); };
@@ -528,7 +530,7 @@ document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPick
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
    ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
 
-window.togglePick = togglePick; window.delLeave = delLeave; window.tryApprove = tryApprove;
+window.togglePick = togglePick; window.delLeave = delLeave;
 window.askDelMember = askDelMember; window.confirmDelMember = confirmDelMember; window.cancelDel = cancelDel;
 
 /* เตือนถ้าปิดหน้าขณะยังบันทึกไฟล์ไม่เสร็จ */

@@ -1,0 +1,10 @@
+# ข้อมูลจริงของทีม — ไม่ต้องขึ้น repo
+data.json
+backups/
+
+# ไฟล์ชั่วคราวจากการเขียนแบบ atomic
+.data-*.tmp
+
+# Python
+__pycache__/
+*.pyc
