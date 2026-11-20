@@ -139,7 +139,7 @@
       </div>
 
       <div class="card">
-        <h2>ข้อมูลกลางบน GitHub</h2>
+        <h2>ข้อมูลกลางของทีม (Google Sheet)</h2>
         <div id="ghCard"></div>
       </div>
     </div>
@@ -196,14 +196,14 @@ let picked = new Set();   // วันที่กำลังเลือกอ
 let pendingDel = null;    // โปรไฟล์ที่รอการยืนยันลบ
 
 /* ===== ชั้นเก็บข้อมูล =====
-   โหมด "github" : ทุกคนอ่าน/เขียนไฟล์ data.json ไฟล์เดียวกันบน GitHub (ข้อมูลกลางของทีม)
-   โหมด "file"   : รัน server.py ในเครื่อง → บันทึกลงไฟล์ data.json ของเครื่องนั้น
-   โหมด "local"  : เปิด index.html ตรง ๆ → เก็บในเบราว์เซอร์เครื่องเดียว                     */
+   โหมด "sheet" : ทุกคนอ่าน/เขียน Google Sheet แผ่นเดียวกันผ่าน Apps Script (ข้อมูลกลางของทีม)
+                  ผู้ใช้แค่เปิดหน้าเว็บ ไม่ต้องล็อกอินหรือกรอก token ใด ๆ
+   โหมด "file"  : รัน server.py ในเครื่อง → บันทึกลงไฟล์ data.json ของเครื่องนั้น
+   โหมด "local" : เปิด index.html ตรง ๆ → เก็บในเบราว์เซอร์เครื่องเดียว                        */
 const API = "/api/data";
-const CFG_KEY = "leave-planner-github";
+const CFG_KEY = "leave-planner-sheet";
 let MODE = "local", saveTimer = null, saving = false, pendingSave = false, lastSavedAt = null;
-let gh = null;            // { owner, repo, branch, path, token }
-let baseSha = null;       // sha ของ data.json เวอร์ชันที่เราโหลดมา ใช้ตรวจว่ามีคนแก้ทับหรือยัง
+let sheetUrl = null;      // ลิงก์ Web app ของ Apps Script (ลงท้าย /exec)
 let applyingRemote = false;
 let pollTimer = null;
 
@@ -212,49 +212,28 @@ function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)); } ca
 function saveCfg(c){ localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
 const normalize = d => Object.assign({ members:[], leaves:[], deleted:[] }, d||{});
 
-/* ---- แปลง UTF-8 ↔ base64 (GitHub API รับ-ส่งเป็น base64) ---- */
-function b64encode(str){
-  const bytes = new TextEncoder().encode(str);
-  let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
-  return btoa(bin);
-}
-function b64decode(b64){
-  const bin = atob(String(b64).replace(/\s/g, ""));
-  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-/* ---- GitHub Contents API ---- */
-const ghUrl = () => `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${gh.path}`;
-const ghHeaders = () => ({ "Authorization": "Bearer " + gh.token,
-                           "Accept": "application/vnd.github+json",
-                           "X-GitHub-Api-Version": "2022-11-28" });
-
-async function ghRead(){
-  const r = await fetch(`${ghUrl()}?ref=${encodeURIComponent(gh.branch)}&t=${Date.now()}`,
-                        { headers: ghHeaders(), cache:"no-store" });
-  if(r.status === 404) return { data: null, sha: null };          // ยังไม่มีไฟล์ — สร้างให้ตอนบันทึกครั้งแรก
-  if(r.status === 401) throw new Error("token ไม่ถูกต้องหรือหมดอายุ");
-  if(r.status === 403) throw new Error("token ไม่มีสิทธิ์เข้าถึง repo นี้");
-  if(!r.ok) throw new Error("อ่านไฟล์ไม่สำเร็จ (HTTP " + r.status + ")");
+/* ---- คุยกับ Apps Script ----
+   ส่งเป็น text/plain เพื่อให้เป็น simple request เบราว์เซอร์จะได้ไม่ต้องขอ preflight
+   (Apps Script ไม่ตอบ OPTIONS จึงใช้ JSON content-type ไม่ได้) */
+async function sheetRead(){
+  const r = await fetch(`${sheetUrl}?t=${Date.now()}`, { cache:"no-store", redirect:"follow" });
+  if(!r.ok) throw new Error("เชื่อมต่อไม่สำเร็จ (HTTP " + r.status + ")");
   const j = await r.json();
-  return { data: normalize(JSON.parse(b64decode(j.content))), sha: j.sha };
+  if(!j.ok) throw new Error(j.error || "อ่านข้อมูลไม่สำเร็จ");
+  return normalize(j.data);
 }
 
-async function ghWrite(payload, sha){
-  const body = { message: `อัปเดตวันลา — ${new Date().toLocaleString("th-TH")}`,
-                 content: b64encode(JSON.stringify(payload, null, 2)),
-                 branch: gh.branch };
-  if(sha) body.sha = sha;
-  const r = await fetch(ghUrl(), { method:"PUT", headers: ghHeaders(), body: JSON.stringify(body) });
-  if(r.status === 409 || r.status === 422) return { conflict: true };
-  if(!r.ok){
-    let msg = "HTTP " + r.status;
-    try { msg = (await r.json()).message || msg; } catch(e){}
-    throw new Error(msg);
-  }
+async function sheetWrite(payload){
+  const r = await fetch(sheetUrl, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(payload),
+    redirect: "follow"
+  });
+  if(!r.ok) throw new Error("บันทึกไม่สำเร็จ (HTTP " + r.status + ")");
   const j = await r.json();
-  return { sha: j.content.sha };
+  if(!j.ok) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+  return j;            // { data (รวมของทุกคนแล้ว), savedAt }
 }
 
 /* ---- รวมข้อมูลของเรากับของคนอื่นที่บันทึกแทรกเข้ามา ----
@@ -269,18 +248,17 @@ function mergeStates(remote, local){
 }
 
 async function boot(){
-  gh = loadCfg();
-  if(gh && gh.token){
+  const cfg = loadCfg();
+  sheetUrl = cfg && cfg.url ? cfg.url : null;
+  if(sheetUrl){
     try {
-      const cur = await ghRead();
-      state = cur.data || normalize(loadLocal());
-      baseSha = cur.sha;
-      MODE = "github";
-      if(!cur.sha) await pushToGitHub();        // ยังไม่มีไฟล์บน repo → สร้างให้เลย
+      state = await sheetRead();
+      MODE = "sheet";
+      lastSavedAt = new Date().toISOString();
       startPolling();
     } catch(e) {
       state = normalize(loadLocal()); MODE = "local";
-      render(); setStatus("error", e.message); return;
+      render(); setStatus("error", e.message); renderGhCard(); return;
     }
   } else {
     try {
@@ -307,7 +285,7 @@ function save(){
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){}   // สำเนากันเหนียว
   if(MODE === "local"){ setStatus(); return; }
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(MODE === "github" ? pushToGitHub : pushToFile, 600);
+  saveTimer = setTimeout(()=>{ saveTimer = null; (MODE === "sheet" ? pushToSheet : pushToFile)(); }, 600);
   setStatus("saving");
 }
 
@@ -329,42 +307,35 @@ async function pushToFile(){
   }
 }
 
-async function pushToGitHub(){
+async function pushToSheet(){
   if(saving){ pendingSave = true; return; }
   saving = true;
   try {
-    for(let attempt = 0; attempt < 4; attempt++){
-      const cur = await ghRead();
-      if(cur.sha !== baseSha && cur.data){        // มีคนบันทึกแทรกเข้ามา → รวมข้อมูลก่อน
-        state = mergeStates(cur.data, state);
-        applyingRemote = true; render(); applyingRemote = false;
-      }
-      const res = await ghWrite(state, cur.sha);
-      if(res.conflict){ await new Promise(r => setTimeout(r, 400 + attempt*400)); continue; }
-      baseSha = res.sha;
-      lastSavedAt = new Date().toISOString();
-      setStatus();
-      return;
-    }
-    throw new Error("มีคนบันทึกพร้อมกันหลายครั้ง ลองใหม่อีกครั้ง");
+    // ฝั่ง Apps Script จะรวมข้อมูลของทุกคนให้แล้วส่งผลลัพธ์กลับมา
+    const res = await sheetWrite(state);
+    state = mergeStates(normalize(res.data), state);
+    applyingRemote = true; render(); applyingRemote = false;
+    lastSavedAt = res.savedAt || new Date().toISOString();
+    setStatus();
   } catch(e) {
     setStatus("error", e.message);
   } finally {
     saving = false;
-    if(pendingSave){ pendingSave = false; pushToGitHub(); }
+    if(pendingSave){ pendingSave = false; pushToSheet(); }
   }
 }
 
-/* ดึงของใหม่จาก GitHub เป็นระยะ เผื่อมีคนอื่นจดวันลาเข้ามา */
+/* ดึงของใหม่จาก Google Sheet เป็นระยะ เผื่อมีคนอื่นจดวันลาเข้ามา */
 function startPolling(){
   clearInterval(pollTimer);
   pollTimer = setInterval(async ()=>{
-    if(MODE !== "github" || saving || saveTimer) return;
+    if(MODE !== "sheet" || saving || saveTimer) return;
     try {
-      const cur = await ghRead();
-      if(cur.sha && cur.sha !== baseSha && cur.data){
-        state = mergeStates(cur.data, state);
-        baseSha = cur.sha;
+      const remote = await sheetRead();
+      const before = JSON.stringify([state.members, state.leaves]);
+      const merged = mergeStates(remote, state);
+      if(JSON.stringify([merged.members, merged.leaves]) !== before){
+        state = merged;
         applyingRemote = true; render(); applyingRemote = false;
         setStatus();
         showAlert("มีการอัปเดตจากเพื่อนร่วมทีม — ดึงข้อมูลล่าสุดมาแล้ว", "ok");
@@ -380,12 +351,12 @@ function setStatus(kind, msg){
   if(kind === "saving"){ el.className = "storage";
     el.innerHTML = `<i class="dot" style="background:var(--muted)"></i>กำลังบันทึก…`; return; }
   const t = lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",second:"2-digit"}) : "—";
-  if(MODE === "github"){ el.className = "storage ok";
-    el.innerHTML = `<i class="dot"></i>ข้อมูลกลางบน GitHub <b>${esc(gh.owner)}/${esc(gh.repo)}</b> — บันทึกล่าสุด ${t}`; return; }
+  if(MODE === "sheet"){ el.className = "storage ok";
+    el.innerHTML = `<i class="dot"></i>ข้อมูลกลางบน <b>Google Sheet</b> — บันทึกล่าสุด ${t}`; return; }
   if(MODE === "file"){ el.className = "storage ok";
     el.innerHTML = `<i class="dot"></i>บันทึกลงไฟล์ <b>data.json</b> ในเครื่องนี้ เมื่อ ${t}`; return; }
   el.className = "storage warn";
-  el.innerHTML = `<i class="dot"></i>เก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ตั้งค่า “ข้อมูลกลางบน GitHub” ด้านล่างเพื่อใช้ร่วมกันทั้งทีม`;
+  el.innerHTML = `<i class="dot"></i>เก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ใส่ลิงก์ Google Sheet ด้านล่างเพื่อใช้ข้อมูลร่วมกันทั้งทีม`;
 }
 /* id ต้องไม่ชนกันแม้หลายคนจดพร้อมกันคนละเครื่อง จึงผสมเวลาเข้าไปด้วย */
 function uid(){ return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8); }
@@ -658,105 +629,76 @@ document.getElementById("btnSubmit").onclick = submitLeave;
 document.getElementById("selMember").onchange = ()=>{ picked.clear(); renderCalendar(); renderPickInfo(); };
 document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPickInfo(); };
 
-/* ---------- การ์ดตั้งค่าข้อมูลกลางบน GitHub ---------- */
+/* ---------- การ์ดตั้งค่าข้อมูลกลางบน Google Sheet ---------- */
 function renderGhCard(){
   const box = document.getElementById("ghCard"); if(!box) return;
-  if(MODE === "github"){
+  if(MODE === "sheet"){
     box.innerHTML = `
-      <div class="storage ok" style="margin:0 0 10px"><i class="dot"></i>เชื่อมต่ออยู่</div>
-      <table>
-        <tr><th>repo</th><td>${esc(gh.owner)}/${esc(gh.repo)}</td></tr>
-        <tr><th>branch</th><td>${esc(gh.branch)}</td></tr>
-        <tr><th>ไฟล์</th><td>${esc(gh.path)}</td></tr>
-      </table>
+      <div class="storage ok" style="margin:0 0 10px"><i class="dot"></i>ใช้ข้อมูลกลางอยู่</div>
+      <div class="hint" style="word-break:break-all;margin-top:0">${esc(sheetUrl)}</div>
       <div class="row" style="margin-top:10px">
-        <button class="ghost" id="btnGhPull">ดึงข้อมูลล่าสุด</button>
-        <button class="ghost danger" id="btnGhOut">ออกจากการเชื่อมต่อ</button>
+        <button class="ghost" id="btnShPull">ดึงข้อมูลล่าสุด</button>
+        <button class="ghost danger" id="btnShOut">เลิกใช้ข้อมูลกลาง</button>
       </div>
-      <div class="hint">ระบบดึงข้อมูลใหม่ให้อัตโนมัติทุก 30 วินาที ถ้ามีคนแก้พร้อมกันจะรวมข้อมูลให้เอง</div>`;
-    document.getElementById("btnGhPull").onclick = ghPullNow;
-    document.getElementById("btnGhOut").onclick = ghDisconnect;
+      <div class="hint">ระบบดึงข้อมูลใหม่ให้อัตโนมัติทุก 30 วินาที ถ้าหลายคนบันทึกพร้อมกันจะรวมข้อมูลให้เอง</div>`;
+    document.getElementById("btnShPull").onclick = shPullNow;
+    document.getElementById("btnShOut").onclick = shDisconnect;
     return;
   }
-  const c = loadCfg() || { owner:"", repo:"", branch:"main", path:"data.json" };
+  const c = loadCfg() || { url:"" };
   box.innerHTML = `
-    <div class="hint" style="margin-top:0">ให้ทุกคนในทีมกรอกค่าชุดเดียวกัน แล้วใส่ token ของตัวเอง
-      ข้อมูลวันลาจะถูกเขียนลงไฟล์เดียวกันบน GitHub</div>
-    <div class="row">
-      <div><label>เจ้าของ repo</label><input id="ghOwner" value="${esc(c.owner)}" placeholder="pongdanaip"></div>
-      <div><label>ชื่อ repo</label><input id="ghRepo" value="${esc(c.repo)}" placeholder="leave-data"></div>
-    </div>
-    <div class="row">
-      <div><label>branch</label><input id="ghBranch" value="${esc(c.branch||"main")}"></div>
-      <div><label>ไฟล์ข้อมูล</label><input id="ghPath" value="${esc(c.path||"data.json")}"></div>
-    </div>
-    <label>GitHub token ของคุณ (ต้องมีสิทธิ์ Contents: read and write)</label>
-    <input id="ghToken" type="password" placeholder="github_pat_… หรือ ghp_…" autocomplete="off">
-    <button id="btnGhIn" style="margin-top:12px;width:100%">เชื่อมต่อและใช้ข้อมูลกลาง</button>
-    <div id="ghMsg" class="hint"></div>
-    <div class="hint">token เก็บไว้ในเบราว์เซอร์ของคุณเครื่องเดียว ไม่ถูกส่งไปที่อื่นนอกจาก GitHub
-      แนะนำให้ใช้ fine-grained token ที่ให้สิทธิ์เฉพาะ repo นี้ และตั้งวันหมดอายุไว้</div>`;
-  document.getElementById("btnGhIn").onclick = ghConnect;
+    <div class="hint" style="margin-top:0">วางลิงก์ Web app ของ Google Sheet ที่ทีมใช้ร่วมกัน
+      วางครั้งเดียวแล้วจำไว้ให้ ไม่ต้องล็อกอินและไม่ต้องกรอกอะไรอีก</div>
+    <label>ลิงก์ Google Sheet (ลงท้ายด้วย /exec)</label>
+    <input id="shUrl" value="${esc(c.url||"")}" placeholder="https://script.google.com/macros/s/.../exec">
+    <button id="btnShIn" style="margin-top:12px;width:100%">ใช้ข้อมูลกลาง</button>
+    <div id="shMsg" class="hint"></div>
+    <div class="hint">ยังไม่มีลิงก์? ดูวิธีสร้างในไฟล์ <b>apps-script/Code.gs</b> ของโปรเจกต์
+      (สร้าง Google Sheet → Extensions → Apps Script → Deploy เป็น Web app)</div>`;
+  document.getElementById("btnShIn").onclick = shConnect;
 }
 
-async function ghConnect(){
-  const msg = document.getElementById("ghMsg");
-  const cfg = {
-    owner:  document.getElementById("ghOwner").value.trim(),
-    repo:   document.getElementById("ghRepo").value.trim(),
-    branch: document.getElementById("ghBranch").value.trim() || "main",
-    path:   document.getElementById("ghPath").value.trim() || "data.json",
-    token:  document.getElementById("ghToken").value.trim()
-  };
-  if(!cfg.owner || !cfg.repo || !cfg.token){ msg.innerHTML = "กรอกเจ้าของ repo ชื่อ repo และ token ให้ครบ"; return; }
-  msg.innerHTML = "กำลังตรวจสอบการเชื่อมต่อ…";
-  const keep = gh;
-  gh = cfg;
+async function shConnect(){
+  const msg = document.getElementById("shMsg");
+  const url = document.getElementById("shUrl").value.trim();
+  if(!/^https:\/\/script\.google\.com\/.*\/exec$/.test(url)){
+    msg.innerHTML = `<span style="color:var(--bad)">ลิงก์ต้องเป็นของ script.google.com และลงท้ายด้วย /exec</span>`; return;
+  }
+  msg.innerHTML = "กำลังเชื่อมต่อ…";
+  const keep = sheetUrl;
+  sheetUrl = url;
   try {
-    // เช็คว่า repo เป็น public หรือไม่ เพื่อเตือนเรื่องข้อมูลพนักงาน
-    const rr = await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}`, { headers: ghHeaders() });
-    if(!rr.ok) throw new Error(rr.status === 404 ? "ไม่พบ repo นี้ หรือ token ไม่มีสิทธิ์เข้าถึง"
-                                                 : "เชื่อมต่อไม่สำเร็จ (HTTP " + rr.status + ")");
-    const repoInfo = await rr.json();
-    const cur = await ghRead();
+    const remote = await sheetRead();
     const local = state;
-    state = cur.data || normalize(local);
-    if(cur.data && local.members.length && !cur.data.members.length) state = mergeStates(cur.data, local);
-    baseSha = cur.sha;
-    MODE = "github";
-    saveCfg(cfg);
-    if(!cur.sha) await pushToGitHub();
+    state = mergeStates(remote, local);          // ของที่จดไว้ในเครื่องก่อนหน้านี้ ยกขึ้นไปด้วย
+    MODE = "sheet";
+    saveCfg({ url });
+    if(local.members.length || local.leaves.length) await pushToSheet();
     startPolling();
     render(); setStatus(); renderGhCard();
-    showAlert(repoInfo.private
-      ? "เชื่อมต่อข้อมูลกลางบน GitHub แล้ว"
-      : `เชื่อมต่อแล้ว ⚠ repo <b>${esc(cfg.owner)}/${esc(cfg.repo)}</b> เป็นแบบ public ใคร ๆ ก็เห็นชื่อและวันลาของทีม แนะนำให้เปลี่ยนเป็น private`,
-      repoInfo.private ? "ok" : "");
+    showAlert("เชื่อมต่อข้อมูลกลางบน Google Sheet แล้ว ทุกคนที่ใช้ลิงก์นี้จะเห็นข้อมูลชุดเดียวกัน", "ok");
   } catch(e) {
-    gh = keep;
+    sheetUrl = keep;
     msg.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
-async function ghPullNow(){
+async function shPullNow(){
   try {
-    const cur = await ghRead();
-    if(cur.data){
-      state = mergeStates(cur.data, state);
-      baseSha = cur.sha;
-      applyingRemote = true; render(); applyingRemote = false;
-      setStatus();
-    }
-    showAlert("ดึงข้อมูลล่าสุดจาก GitHub แล้ว", "ok");
+    const remote = await sheetRead();
+    state = mergeStates(remote, state);
+    applyingRemote = true; render(); applyingRemote = false;
+    setStatus();
+    showAlert("ดึงข้อมูลล่าสุดแล้ว", "ok");
   } catch(e){ showAlert("ดึงข้อมูลไม่สำเร็จ: " + esc(e.message)); }
 }
 
-function ghDisconnect(){
+function shDisconnect(){
   localStorage.removeItem(CFG_KEY);
   clearInterval(pollTimer);
-  gh = null; baseSha = null; MODE = "local";
+  sheetUrl = null; MODE = "local";
   setStatus(); renderGhCard();
-  showAlert("ออกจากการเชื่อมต่อแล้ว ข้อมูลบน GitHub ยังอยู่ครบ ส่วนเครื่องนี้กลับไปเก็บในเบราว์เซอร์");
+  showAlert("เลิกใช้ข้อมูลกลางแล้ว ข้อมูลบน Google Sheet ยังอยู่ครบ ส่วนเครื่องนี้กลับไปเก็บในเบราว์เซอร์");
 }
 
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
@@ -767,7 +709,7 @@ window.askDelMember = askDelMember; window.confirmDelMember = confirmDelMember; 
 
 /* เตือนถ้าปิดหน้าขณะยังบันทึกไฟล์ไม่เสร็จ */
 window.addEventListener("beforeunload", e=>{
-  if(MODE==="file" && (saving || saveTimer && pendingSave)){ e.preventDefault(); e.returnValue=""; }
+  if(MODE!=="local" && (saving || saveTimer)){ e.preventDefault(); e.returnValue=""; }
 });
 
 boot();
