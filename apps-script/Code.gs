@@ -86,7 +86,11 @@ function writeSheet(name, rows) {
   var out = rows.map(function (o) {
     return cols.map(function (c) { return o[c] === undefined ? '' : o[c]; });
   });
-  sh.getRange(2, 1, out.length, cols.length).setValues(out);
+  var range = sh.getRange(2, 1, out.length, cols.length);
+  // บังคับคอลัมน์ date ให้เป็นข้อความ ไม่ให้ชีตแปลง "2026-12-09" เป็นวันที่แล้วคืนค่ากลับมาเป็น Date
+  var dateCol = cols.indexOf('date');
+  if (dateCol >= 0) sh.getRange(2, dateCol + 1, out.length, 1).setNumberFormat('@');
+  range.setValues(out);
 }
 
 function readAll() {

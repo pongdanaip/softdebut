@@ -202,6 +202,8 @@ let pendingDel = null;    // โปรไฟล์ที่รอการยื
    โหมด "local" : เปิด index.html ตรง ๆ → เก็บในเบราว์เซอร์เครื่องเดียว                        */
 const API = "/api/data";
 const CFG_KEY = "leave-planner-sheet";
+/* ลิงก์ข้อมูลกลางของทีม — ใช้ลิงก์นี้เสมอ ไม่ต้องตั้งค่าอะไรก่อนใช้งาน */
+const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbz3atZulesM7z0O9Cjv3WQhjAMVyIICY_qV_QwJJ6mwUhUEAXdHYv-J0ih6kbeJSkyr/exec";
 let MODE = "local", saveTimer = null, saving = false, pendingSave = false, lastSavedAt = null;
 let sheetUrl = null;      // ลิงก์ Web app ของ Apps Script (ลงท้าย /exec)
 let applyingRemote = false;
@@ -210,7 +212,24 @@ let pollTimer = null;
 function loadLocal(){ try { return JSON.parse(localStorage.getItem(KEY)); } catch(e){ return null; } }
 function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)); } catch(e){ return null; } }
 function saveCfg(c){ localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
-const normalize = d => Object.assign({ members:[], leaves:[], deleted:[] }, d||{});
+/* Google Sheet อาจคืนวันที่มาเป็น Date ของ JS ("Wed Dec 09 2026 …") แทน "2026-12-09"
+   จึงแปลงให้เป็นรูปแบบเดียวกันเสมอก่อนใช้งาน */
+function toYMD(v){
+  if(v == null) return "";
+  const s = String(v);
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const d = new Date(s);
+  if(isNaN(d)) return s;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function normalize(d){
+  d = d || {};
+  return {
+    members: (d.members||[]).map(m => ({ ...m, quota: Number(m.quota)||0 })),
+    leaves:  (d.leaves||[]).map(l => ({ ...l, date: toYMD(l.date), span: SPAN[l.span] ? l.span : "full" })),
+    deleted: (d.deleted||[]).map(String)
+  };
+}
 
 /* ---- คุยกับ Apps Script ----
    ส่งเป็น text/plain เพื่อให้เป็น simple request เบราว์เซอร์จะได้ไม่ต้องขอ preflight
@@ -249,7 +268,7 @@ function mergeStates(remote, local){
 
 async function boot(){
   const cfg = loadCfg();
-  sheetUrl = cfg && cfg.url ? cfg.url : null;
+  sheetUrl = (cfg && cfg.url) || DEFAULT_SHEET_URL;      // ไม่ต้องตั้งค่า ใช้ข้อมูลกลางของทีมทันที
   if(sheetUrl){
     try {
       state = await sheetRead();
@@ -275,7 +294,7 @@ async function boot(){
       state = normalize(loadLocal()); MODE = "local";
     }
   }
-  render();
+  applyingRemote = true; render(); applyingRemote = false;   // เปิดหน้าเฉย ๆ ไม่ต้องเขียนทับข้อมูลกลาง
   setStatus();
   renderGhCard();
 }
@@ -632,30 +651,49 @@ document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPick
 /* ---------- การ์ดตั้งค่าข้อมูลกลางบน Google Sheet ---------- */
 function renderGhCard(){
   const box = document.getElementById("ghCard"); if(!box) return;
+  const custom = (loadCfg()||{}).url;
   if(MODE === "sheet"){
     box.innerHTML = `
-      <div class="storage ok" style="margin:0 0 10px"><i class="dot"></i>ใช้ข้อมูลกลางอยู่</div>
-      <div class="hint" style="word-break:break-all;margin-top:0">${esc(sheetUrl)}</div>
+      <div class="storage ok" style="margin:0 0 10px"><i class="dot"></i>เชื่อมกับข้อมูลกลางของทีมอยู่</div>
+      <div class="hint" style="margin-top:0">ทุกคนที่เปิดหน้านี้เห็นข้อมูลชุดเดียวกันอัตโนมัติ
+        ไม่ต้องล็อกอินหรือตั้งค่าอะไร ระบบดึงข้อมูลใหม่ให้ทุก 30 วินาที</div>
       <div class="row" style="margin-top:10px">
         <button class="ghost" id="btnShPull">ดึงข้อมูลล่าสุด</button>
-        <button class="ghost danger" id="btnShOut">เลิกใช้ข้อมูลกลาง</button>
+        <button class="ghost" id="btnShEdit">ใช้ลิงก์อื่น</button>
       </div>
-      <div class="hint">ระบบดึงข้อมูลใหม่ให้อัตโนมัติทุก 30 วินาที ถ้าหลายคนบันทึกพร้อมกันจะรวมข้อมูลให้เอง</div>`;
+      <div id="shEdit" hidden style="margin-top:10px">
+        <label>ลิงก์ Google Sheet (ลงท้ายด้วย /exec)</label>
+        <input id="shUrl" value="${esc(custom||"")}" placeholder="${esc(DEFAULT_SHEET_URL)}">
+        <div class="row" style="margin-top:8px">
+          <button id="btnShIn">ใช้ลิงก์นี้</button>
+          <button class="ghost" id="btnShReset">กลับไปใช้ลิงก์ของทีม</button>
+        </div>
+        <div id="shMsg" class="hint"></div>
+      </div>`;
     document.getElementById("btnShPull").onclick = shPullNow;
-    document.getElementById("btnShOut").onclick = shDisconnect;
+    document.getElementById("btnShEdit").onclick = ()=>{
+      const e = document.getElementById("shEdit"); e.hidden = !e.hidden;
+    };
+    document.getElementById("btnShIn").onclick = shConnect;
+    document.getElementById("btnShReset").onclick = shResetUrl;
     return;
   }
-  const c = loadCfg() || { url:"" };
   box.innerHTML = `
-    <div class="hint" style="margin-top:0">วางลิงก์ Web app ของ Google Sheet ที่ทีมใช้ร่วมกัน
-      วางครั้งเดียวแล้วจำไว้ให้ ไม่ต้องล็อกอินและไม่ต้องกรอกอะไรอีก</div>
+    <div class="storage bad" style="margin:0 0 10px"><i class="dot"></i>ต่อข้อมูลกลางไม่ได้ กำลังใช้ข้อมูลในเบราว์เซอร์แทน</div>
+    <div class="hint" style="margin-top:0">อาจเป็นเพราะเน็ตไม่ติด หรือลิงก์ Web app ถูกเปลี่ยน
+      ลองกดเชื่อมต่อใหม่อีกครั้ง</div>
     <label>ลิงก์ Google Sheet (ลงท้ายด้วย /exec)</label>
-    <input id="shUrl" value="${esc(c.url||"")}" placeholder="https://script.google.com/macros/s/.../exec">
-    <button id="btnShIn" style="margin-top:12px;width:100%">ใช้ข้อมูลกลาง</button>
-    <div id="shMsg" class="hint"></div>
-    <div class="hint">ยังไม่มีลิงก์? ดูวิธีสร้างในไฟล์ <b>apps-script/Code.gs</b> ของโปรเจกต์
-      (สร้าง Google Sheet → Extensions → Apps Script → Deploy เป็น Web app)</div>`;
+    <input id="shUrl" value="${esc(custom || DEFAULT_SHEET_URL)}">
+    <button id="btnShIn" style="margin-top:12px;width:100%">เชื่อมต่อใหม่</button>
+    <div id="shMsg" class="hint"></div>`;
   document.getElementById("btnShIn").onclick = shConnect;
+}
+
+function shResetUrl(){
+  localStorage.removeItem(CFG_KEY);
+  sheetUrl = DEFAULT_SHEET_URL;
+  boot();
+  showAlert("กลับไปใช้ลิงก์ข้อมูลกลางของทีมแล้ว", "ok");
 }
 
 async function shConnect(){
@@ -693,13 +731,6 @@ async function shPullNow(){
   } catch(e){ showAlert("ดึงข้อมูลไม่สำเร็จ: " + esc(e.message)); }
 }
 
-function shDisconnect(){
-  localStorage.removeItem(CFG_KEY);
-  clearInterval(pollTimer);
-  sheetUrl = null; MODE = "local";
-  setStatus(); renderGhCard();
-  showAlert("เลิกใช้ข้อมูลกลางแล้ว ข้อมูลบน Google Sheet ยังอยู่ครบ ส่วนเครื่องนี้กลับไปเก็บในเบราว์เซอร์");
-}
 
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
    ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
