@@ -137,6 +137,11 @@
         <div id="pickInfo" class="hint"></div>
         <button id="btnSubmit" style="margin-top:10px;width:100%">บันทึกวันลาที่เลือก</button>
       </div>
+
+      <div class="card">
+        <h2>ข้อมูลกลางบน GitHub</h2>
+        <div id="ghCard"></div>
+      </div>
     </div>
 
     <!-- ขวา -->
@@ -186,45 +191,123 @@ const DOW = ["จ","อ","พ","พฤ","ศ","ส","อา"];
 const COLORS = ["#3d5afe","#1f9d6b","#d34848","#c98a06","#8b5cf6","#0ea5e9","#ec4899","#64748b","#15803d","#b45309"];
 const KEY = "leave-planner-dec2026";
 
-let state = { members: [], leaves: [] };
+let state = { members: [], leaves: [], deleted: [] };
 let picked = new Set();   // วันที่กำลังเลือกอยู่ (ยังไม่บันทึก)
 let pendingDel = null;    // โปรไฟล์ที่รอการยืนยันลบ
 
 /* ===== ชั้นเก็บข้อมูล =====
-   โหมด "file"  : มี server.py อยู่ → บันทึกลงไฟล์ data.json จริง (ใช้ร่วมกันได้ทั้งทีม)
-   โหมด "local" : เปิดไฟล์ index.html ตรง ๆ → เก็บในเบราว์เซอร์ แล้วส่งออกเป็นไฟล์เองได้   */
+   โหมด "github" : ทุกคนอ่าน/เขียนไฟล์ data.json ไฟล์เดียวกันบน GitHub (ข้อมูลกลางของทีม)
+   โหมด "file"   : รัน server.py ในเครื่อง → บันทึกลงไฟล์ data.json ของเครื่องนั้น
+   โหมด "local"  : เปิด index.html ตรง ๆ → เก็บในเบราว์เซอร์เครื่องเดียว                     */
 const API = "/api/data";
+const CFG_KEY = "leave-planner-github";
 let MODE = "local", saveTimer = null, saving = false, pendingSave = false, lastSavedAt = null;
+let gh = null;            // { owner, repo, branch, path, token }
+let baseSha = null;       // sha ของ data.json เวอร์ชันที่เราโหลดมา ใช้ตรวจว่ามีคนแก้ทับหรือยัง
+let applyingRemote = false;
+let pollTimer = null;
 
 function loadLocal(){ try { return JSON.parse(localStorage.getItem(KEY)); } catch(e){ return null; } }
+function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)); } catch(e){ return null; } }
+function saveCfg(c){ localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+const normalize = d => Object.assign({ members:[], leaves:[], deleted:[] }, d||{});
+
+/* ---- แปลง UTF-8 ↔ base64 (GitHub API รับ-ส่งเป็น base64) ---- */
+function b64encode(str){
+  const bytes = new TextEncoder().encode(str);
+  let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin);
+}
+function b64decode(b64){
+  const bin = atob(String(b64).replace(/\s/g, ""));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/* ---- GitHub Contents API ---- */
+const ghUrl = () => `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${gh.path}`;
+const ghHeaders = () => ({ "Authorization": "Bearer " + gh.token,
+                           "Accept": "application/vnd.github+json",
+                           "X-GitHub-Api-Version": "2022-11-28" });
+
+async function ghRead(){
+  const r = await fetch(`${ghUrl()}?ref=${encodeURIComponent(gh.branch)}&t=${Date.now()}`,
+                        { headers: ghHeaders(), cache:"no-store" });
+  if(r.status === 404) return { data: null, sha: null };          // ยังไม่มีไฟล์ — สร้างให้ตอนบันทึกครั้งแรก
+  if(r.status === 401) throw new Error("token ไม่ถูกต้องหรือหมดอายุ");
+  if(r.status === 403) throw new Error("token ไม่มีสิทธิ์เข้าถึง repo นี้");
+  if(!r.ok) throw new Error("อ่านไฟล์ไม่สำเร็จ (HTTP " + r.status + ")");
+  const j = await r.json();
+  return { data: normalize(JSON.parse(b64decode(j.content))), sha: j.sha };
+}
+
+async function ghWrite(payload, sha){
+  const body = { message: `อัปเดตวันลา — ${new Date().toLocaleString("th-TH")}`,
+                 content: b64encode(JSON.stringify(payload, null, 2)),
+                 branch: gh.branch };
+  if(sha) body.sha = sha;
+  const r = await fetch(ghUrl(), { method:"PUT", headers: ghHeaders(), body: JSON.stringify(body) });
+  if(r.status === 409 || r.status === 422) return { conflict: true };
+  if(!r.ok){
+    let msg = "HTTP " + r.status;
+    try { msg = (await r.json()).message || msg; } catch(e){}
+    throw new Error(msg);
+  }
+  const j = await r.json();
+  return { sha: j.content.sha };
+}
+
+/* ---- รวมข้อมูลของเรากับของคนอื่นที่บันทึกแทรกเข้ามา ----
+   รวมแบบ union ตาม id ส่วนที่ถูกลบจะจำไว้ใน deleted เพื่อไม่ให้ของเก่าฟื้นกลับมา */
+function mergeStates(remote, local){
+  const del = new Set([...(remote.deleted||[]), ...(local.deleted||[])]);
+  const map = arr => new Map((arr||[]).map(x => [x.id, x]));
+  const members = new Map([...map(remote.members), ...map(local.members)]);
+  const leaves  = new Map([...map(remote.leaves),  ...map(local.leaves)]);
+  del.forEach(id => { members.delete(id); leaves.delete(id); });
+  return { members:[...members.values()], leaves:[...leaves.values()], deleted:[...del] };
+}
 
 async function boot(){
-  try {
-    const r = await fetch(API, { cache:"no-store" });
-    if(!r.ok) throw new Error("HTTP " + r.status);
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.error || "โหลดข้อมูลไม่สำเร็จ");
-    state = Object.assign({ members:[], leaves:[] }, j.data);
-    lastSavedAt = j.data.savedAt || null;
-    MODE = "file";
-    // ครั้งแรกที่ยังไม่มี data.json แต่เคยใช้งานในเบราว์เซอร์มาก่อน → ย้ายข้อมูลเดิมขึ้นไฟล์ให้
-    const old = loadLocal();
-    if(!state.members.length && old && old.members && old.members.length){
-      state = old; pushToFile();
+  gh = loadCfg();
+  if(gh && gh.token){
+    try {
+      const cur = await ghRead();
+      state = cur.data || normalize(loadLocal());
+      baseSha = cur.sha;
+      MODE = "github";
+      if(!cur.sha) await pushToGitHub();        // ยังไม่มีไฟล์บน repo → สร้างให้เลย
+      startPolling();
+    } catch(e) {
+      state = normalize(loadLocal()); MODE = "local";
+      render(); setStatus("error", e.message); return;
     }
-  } catch(e) {
-    state = loadLocal() || state;
-    MODE = "local";
+  } else {
+    try {
+      const r = await fetch(API, { cache:"no-store" });
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if(!j.ok) throw new Error(j.error || "โหลดข้อมูลไม่สำเร็จ");
+      state = normalize(j.data);
+      lastSavedAt = j.data.savedAt || null;
+      MODE = "file";
+      const old = loadLocal();
+      if(!state.members.length && old && old.members && old.members.length){ state = normalize(old); pushToFile(); }
+    } catch(e) {
+      state = normalize(loadLocal()); MODE = "local";
+    }
   }
   render();
   setStatus();
+  renderGhCard();
 }
 
 function save(){
+  if(applyingRemote) return;                                      // กำลังรับข้อมูลจากคนอื่น ไม่ต้องเขียนกลับ
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){}   // สำเนากันเหนียว
-  if(MODE !== "file") { setStatus(); return; }
+  if(MODE === "local"){ setStatus(); return; }
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(pushToFile, 400);          // รวบการแก้หลายครั้งให้เขียนไฟล์ครั้งเดียว
+  saveTimer = setTimeout(MODE === "github" ? pushToGitHub : pushToFile, 600);
   setStatus("saving");
 }
 
@@ -246,20 +329,66 @@ async function pushToFile(){
   }
 }
 
+async function pushToGitHub(){
+  if(saving){ pendingSave = true; return; }
+  saving = true;
+  try {
+    for(let attempt = 0; attempt < 4; attempt++){
+      const cur = await ghRead();
+      if(cur.sha !== baseSha && cur.data){        // มีคนบันทึกแทรกเข้ามา → รวมข้อมูลก่อน
+        state = mergeStates(cur.data, state);
+        applyingRemote = true; render(); applyingRemote = false;
+      }
+      const res = await ghWrite(state, cur.sha);
+      if(res.conflict){ await new Promise(r => setTimeout(r, 400 + attempt*400)); continue; }
+      baseSha = res.sha;
+      lastSavedAt = new Date().toISOString();
+      setStatus();
+      return;
+    }
+    throw new Error("มีคนบันทึกพร้อมกันหลายครั้ง ลองใหม่อีกครั้ง");
+  } catch(e) {
+    setStatus("error", e.message);
+  } finally {
+    saving = false;
+    if(pendingSave){ pendingSave = false; pushToGitHub(); }
+  }
+}
+
+/* ดึงของใหม่จาก GitHub เป็นระยะ เผื่อมีคนอื่นจดวันลาเข้ามา */
+function startPolling(){
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async ()=>{
+    if(MODE !== "github" || saving || saveTimer) return;
+    try {
+      const cur = await ghRead();
+      if(cur.sha && cur.sha !== baseSha && cur.data){
+        state = mergeStates(cur.data, state);
+        baseSha = cur.sha;
+        applyingRemote = true; render(); applyingRemote = false;
+        setStatus();
+        showAlert("มีการอัปเดตจากเพื่อนร่วมทีม — ดึงข้อมูลล่าสุดมาแล้ว", "ok");
+      }
+    } catch(e){ /* เน็ตสะดุดชั่วคราว ปล่อยให้รอบถัดไปลองใหม่ */ }
+  }, 30000);
+}
+
 function setStatus(kind, msg){
   const el = document.getElementById("storageStatus"); if(!el) return;
-  if(MODE !== "file"){
-    el.className = "storage warn";
-    el.innerHTML = `<i class="dot"></i>เก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — รัน <b>server.py</b> แล้วเปิดผ่าน localhost เพื่อให้บันทึกลงไฟล์ data.json`;
-    return;
-  }
-  if(kind === "saving"){ el.className = "storage"; el.innerHTML = `<i class="dot" style="background:var(--muted)"></i>กำลังบันทึกลงไฟล์…`; return; }
-  if(kind === "error"){ el.className = "storage bad"; el.innerHTML = `<i class="dot"></i>บันทึกไม่สำเร็จ: ${esc(msg||"")} — ข้อมูลยังอยู่ในเบราว์เซอร์`; return; }
+  if(kind === "error"){ el.className = "storage bad";
+    el.innerHTML = `<i class="dot"></i>บันทึกไม่สำเร็จ: ${esc(msg||"")} — ข้อมูลยังอยู่ในเบราว์เซอร์`; return; }
+  if(kind === "saving"){ el.className = "storage";
+    el.innerHTML = `<i class="dot" style="background:var(--muted)"></i>กำลังบันทึก…`; return; }
   const t = lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",second:"2-digit"}) : "—";
-  el.className = "storage ok";
-  el.innerHTML = `<i class="dot"></i>บันทึกลงไฟล์ <b>data.json</b> แล้ว เมื่อ ${t}`;
+  if(MODE === "github"){ el.className = "storage ok";
+    el.innerHTML = `<i class="dot"></i>ข้อมูลกลางบน GitHub <b>${esc(gh.owner)}/${esc(gh.repo)}</b> — บันทึกล่าสุด ${t}`; return; }
+  if(MODE === "file"){ el.className = "storage ok";
+    el.innerHTML = `<i class="dot"></i>บันทึกลงไฟล์ <b>data.json</b> ในเครื่องนี้ เมื่อ ${t}`; return; }
+  el.className = "storage warn";
+  el.innerHTML = `<i class="dot"></i>เก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ตั้งค่า “ข้อมูลกลางบน GitHub” ด้านล่างเพื่อใช้ร่วมกันทั้งทีม`;
 }
-function uid(){ return Math.random().toString(36).slice(2,9); }
+/* id ต้องไม่ชนกันแม้หลายคนจดพร้อมกันคนละเครื่อง จึงผสมเวลาเข้าไปด้วย */
+function uid(){ return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8); }
 const pad = n => String(n).padStart(2,"0");
 const round5 = n => Math.round(n*2)/2;   // ปัดเป็นครึ่งวัน กันเลขทศนิยมเพี้ยน
 const ymd = d => `${YEAR}-${pad(MONTH)}-${pad(d)}`;
@@ -486,6 +615,7 @@ function submitLeave(){
 function delLeave(lid){
   const l = state.leaves.find(x=>x.id===lid);
   state.leaves = state.leaves.filter(x=>x.id!==lid);
+  state.deleted = [...new Set([...(state.deleted||[]), lid])];   // จำไว้ว่าลบแล้ว กันข้อมูลฟื้นตอนรวมกับของคนอื่น
   if(l){ const m = memberById(l.memberId);
     showAlert(`ยกเลิกวันลา ${dayNum(l.date)} ธ.ค. ของ ${esc(m?m.name:"")} แล้ว`, "ok"); }
   render();
@@ -497,9 +627,10 @@ function askDelMember(id){ pendingDel = id; renderMembers(); }
 function cancelDel(){ pendingDel = null; renderMembers(); }
 function confirmDelMember(id){
   const m = memberById(id); if(!m) return;
-  const n = state.leaves.filter(l=>l.memberId===id).length;
+  const gone = state.leaves.filter(l=>l.memberId===id), n = gone.length;
   state.members = state.members.filter(x=>x.id!==id);
   state.leaves = state.leaves.filter(l=>l.memberId!==id);
+  state.deleted = [...new Set([...(state.deleted||[]), id, ...gone.map(l=>l.id)])];
   pendingDel = null;
   showAlert(`ลบโปรไฟล์ <b>${esc(m.name)}</b> แล้ว${n?` พร้อมวันลา ${n} รายการ`:""}`, "ok");
   render();
@@ -526,6 +657,107 @@ document.getElementById("btnAddMember").onclick = ()=>{
 document.getElementById("btnSubmit").onclick = submitLeave;
 document.getElementById("selMember").onchange = ()=>{ picked.clear(); renderCalendar(); renderPickInfo(); };
 document.getElementById("selSpan").onchange = ()=>{ renderCalendar(); renderPickInfo(); };
+
+/* ---------- การ์ดตั้งค่าข้อมูลกลางบน GitHub ---------- */
+function renderGhCard(){
+  const box = document.getElementById("ghCard"); if(!box) return;
+  if(MODE === "github"){
+    box.innerHTML = `
+      <div class="storage ok" style="margin:0 0 10px"><i class="dot"></i>เชื่อมต่ออยู่</div>
+      <table>
+        <tr><th>repo</th><td>${esc(gh.owner)}/${esc(gh.repo)}</td></tr>
+        <tr><th>branch</th><td>${esc(gh.branch)}</td></tr>
+        <tr><th>ไฟล์</th><td>${esc(gh.path)}</td></tr>
+      </table>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="btnGhPull">ดึงข้อมูลล่าสุด</button>
+        <button class="ghost danger" id="btnGhOut">ออกจากการเชื่อมต่อ</button>
+      </div>
+      <div class="hint">ระบบดึงข้อมูลใหม่ให้อัตโนมัติทุก 30 วินาที ถ้ามีคนแก้พร้อมกันจะรวมข้อมูลให้เอง</div>`;
+    document.getElementById("btnGhPull").onclick = ghPullNow;
+    document.getElementById("btnGhOut").onclick = ghDisconnect;
+    return;
+  }
+  const c = loadCfg() || { owner:"", repo:"", branch:"main", path:"data.json" };
+  box.innerHTML = `
+    <div class="hint" style="margin-top:0">ให้ทุกคนในทีมกรอกค่าชุดเดียวกัน แล้วใส่ token ของตัวเอง
+      ข้อมูลวันลาจะถูกเขียนลงไฟล์เดียวกันบน GitHub</div>
+    <div class="row">
+      <div><label>เจ้าของ repo</label><input id="ghOwner" value="${esc(c.owner)}" placeholder="pongdanaip"></div>
+      <div><label>ชื่อ repo</label><input id="ghRepo" value="${esc(c.repo)}" placeholder="leave-data"></div>
+    </div>
+    <div class="row">
+      <div><label>branch</label><input id="ghBranch" value="${esc(c.branch||"main")}"></div>
+      <div><label>ไฟล์ข้อมูล</label><input id="ghPath" value="${esc(c.path||"data.json")}"></div>
+    </div>
+    <label>GitHub token ของคุณ (ต้องมีสิทธิ์ Contents: read and write)</label>
+    <input id="ghToken" type="password" placeholder="github_pat_… หรือ ghp_…" autocomplete="off">
+    <button id="btnGhIn" style="margin-top:12px;width:100%">เชื่อมต่อและใช้ข้อมูลกลาง</button>
+    <div id="ghMsg" class="hint"></div>
+    <div class="hint">token เก็บไว้ในเบราว์เซอร์ของคุณเครื่องเดียว ไม่ถูกส่งไปที่อื่นนอกจาก GitHub
+      แนะนำให้ใช้ fine-grained token ที่ให้สิทธิ์เฉพาะ repo นี้ และตั้งวันหมดอายุไว้</div>`;
+  document.getElementById("btnGhIn").onclick = ghConnect;
+}
+
+async function ghConnect(){
+  const msg = document.getElementById("ghMsg");
+  const cfg = {
+    owner:  document.getElementById("ghOwner").value.trim(),
+    repo:   document.getElementById("ghRepo").value.trim(),
+    branch: document.getElementById("ghBranch").value.trim() || "main",
+    path:   document.getElementById("ghPath").value.trim() || "data.json",
+    token:  document.getElementById("ghToken").value.trim()
+  };
+  if(!cfg.owner || !cfg.repo || !cfg.token){ msg.innerHTML = "กรอกเจ้าของ repo ชื่อ repo และ token ให้ครบ"; return; }
+  msg.innerHTML = "กำลังตรวจสอบการเชื่อมต่อ…";
+  const keep = gh;
+  gh = cfg;
+  try {
+    // เช็คว่า repo เป็น public หรือไม่ เพื่อเตือนเรื่องข้อมูลพนักงาน
+    const rr = await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}`, { headers: ghHeaders() });
+    if(!rr.ok) throw new Error(rr.status === 404 ? "ไม่พบ repo นี้ หรือ token ไม่มีสิทธิ์เข้าถึง"
+                                                 : "เชื่อมต่อไม่สำเร็จ (HTTP " + rr.status + ")");
+    const repoInfo = await rr.json();
+    const cur = await ghRead();
+    const local = state;
+    state = cur.data || normalize(local);
+    if(cur.data && local.members.length && !cur.data.members.length) state = mergeStates(cur.data, local);
+    baseSha = cur.sha;
+    MODE = "github";
+    saveCfg(cfg);
+    if(!cur.sha) await pushToGitHub();
+    startPolling();
+    render(); setStatus(); renderGhCard();
+    showAlert(repoInfo.private
+      ? "เชื่อมต่อข้อมูลกลางบน GitHub แล้ว"
+      : `เชื่อมต่อแล้ว ⚠ repo <b>${esc(cfg.owner)}/${esc(cfg.repo)}</b> เป็นแบบ public ใคร ๆ ก็เห็นชื่อและวันลาของทีม แนะนำให้เปลี่ยนเป็น private`,
+      repoInfo.private ? "ok" : "");
+  } catch(e) {
+    gh = keep;
+    msg.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+  }
+}
+
+async function ghPullNow(){
+  try {
+    const cur = await ghRead();
+    if(cur.data){
+      state = mergeStates(cur.data, state);
+      baseSha = cur.sha;
+      applyingRemote = true; render(); applyingRemote = false;
+      setStatus();
+    }
+    showAlert("ดึงข้อมูลล่าสุดจาก GitHub แล้ว", "ok");
+  } catch(e){ showAlert("ดึงข้อมูลไม่สำเร็จ: " + esc(e.message)); }
+}
+
+function ghDisconnect(){
+  localStorage.removeItem(CFG_KEY);
+  clearInterval(pollTimer);
+  gh = null; baseSha = null; MODE = "local";
+  setStatus(); renderGhCard();
+  showAlert("ออกจากการเชื่อมต่อแล้ว ข้อมูลบน GitHub ยังอยู่ครบ ส่วนเครื่องนี้กลับไปเก็บในเบราว์เซอร์");
+}
 
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
    ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
