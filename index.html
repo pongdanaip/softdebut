@@ -16,12 +16,16 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font-family:"Noto Sans Thai","Sarabun","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.55}
-  .wrap{max-width:1180px;margin:0 auto;padding:24px 18px 64px}
+  .wrap{width:100%;margin:0;padding:24px 24px 64px}   /* เต็มความกว้างจอ */
   header.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
   h1{font-size:24px;margin:0}
   h2{font-size:17px;margin:0 0 12px}
   .sub{color:var(--muted);font-size:13px;margin-top:4px}
-  .grid{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+  .grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start}
+  @media(min-width:1600px){                      /* จอกว้างมาก ให้คอลัมน์ซ้ายโปร่งขึ้นนิดหนึ่ง */
+    .grid{grid-template-columns:400px minmax(0,1fr);gap:22px}
+    .cell{min-height:110px}
+  }
   @media(max-width:900px){
     .grid{grid-template-columns:1fr}
     .grid>div:last-child{order:-1}   /* จอแคบ: เห็นปฏิทินก่อน แล้วค่อยเลื่อนลงไปจดวันลา */
