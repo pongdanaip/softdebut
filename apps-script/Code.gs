@@ -15,9 +15,12 @@
  * ถ้า URL หลุด ให้กด Deploy → Manage deployments → Archive แล้ว deploy ใหม่เพื่อเปลี่ยน URL
  */
 
+/* approval ต่อท้ายคอลัมน์เดิมไว้ ชีตที่ใช้งานอยู่แล้วจะได้ไม่ต้องย้ายข้อมูล
+   ค่าที่เป็นไปได้: pending (รออนุมัติ), approved (อนุมัติแล้ว), rejected (ไม่อนุมัติ)
+   ช่องว่างถือว่า pending */
 var SHEETS = {
   members: ['id', 'name', 'role', 'quota'],
-  leaves:  ['id', 'memberId', 'date', 'span', 'note'],
+  leaves:  ['id', 'memberId', 'date', 'span', 'note', 'approval'],
   deleted: ['id']
 };
 
@@ -55,7 +58,19 @@ function sheetFor(name) {
     sh.setFrozenRows(1);
   }
   if (sh.getLastRow() === 0) sh.appendRow(SHEETS[name]);
+  ensureHeader(sh, SHEETS[name]);
   return sh;
+}
+
+/** เขียนหัวตารางให้ครบเสมอ เผื่อชีตเดิมสร้างไว้ตอนที่ยังไม่มีคอลัมน์ใหม่ */
+function ensureHeader(sh, cols) {
+  var head = sh.getRange(1, 1, 1, cols.length).getValues()[0];
+  for (var i = 0; i < cols.length; i++) {
+    if (String(head[i]) !== cols[i]) {
+      sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+      return;
+    }
+  }
 }
 
 function readSheet(name) {
@@ -71,6 +86,7 @@ function readSheet(name) {
         var v = row[i];
         if (c === 'quota') v = Number(v) || 0;
         else if (c === 'date' && v instanceof Date) v = Utilities.formatDate(v, 'Asia/Bangkok', 'yyyy-MM-dd');
+        else if (c === 'approval') v = String(v).trim() || 'pending';
         else v = String(v);
         o[c] = v;
       });
