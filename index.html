@@ -80,9 +80,6 @@
   .chip{font-size:10px;padding:1px 6px;border-radius:20px;color:#fff;max-width:100%;
         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0}
   .chip.pend{opacity:.45;text-decoration:line-through}
-  .chip.wait{opacity:.5;font-style:italic}            /* รออนุมัติ */
-  .pill.bad{background:var(--bad-soft);color:var(--bad)}
-  button.ok-btn{background:var(--ok-soft);color:var(--ok)}
   .cap{position:absolute;right:6px;top:6px;font-size:10px;color:var(--muted);white-space:nowrap}
 
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:12px}
@@ -202,7 +199,6 @@
           <span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>ลาซ้อนกัน 2 คน</span>
           <span><i style="background:var(--bad-soft);border:1px solid var(--bad)"></i>ลาซ้อนกันตั้งแต่ 3 คน</span>
           <span><i style="background:var(--holiday-soft);border:1px solid var(--holiday)"></i>วันหยุดนักขัตฤกษ์</span>
-          <span>ชื่อที่จางและเอียง = ใบลายังรออนุมัติ ส่วนใบที่ไม่อนุมัติจะไม่ขึ้นในปฏิทิน</span>
           <span>ตัวเลขมุมขวา = จำนวนคนลาวันนั้น ถ้าเช้ากับบ่ายไม่เท่ากันจะแสดงเป็น “ช · บ”</span>
         </div>
       </div>
@@ -273,9 +269,7 @@ function normalize(d){
   d = d || {};
   return {
     members: (d.members||[]).map(m => ({ ...m, quota: Number(m.quota)||0 })),
-    leaves:  (d.leaves||[]).map(l => ({ ...l, date: toYMD(l.date),
-                                        span: SPAN[l.span] ? l.span : "full",
-                                        approval: APPROVAL[l.approval] ? l.approval : "pending" })),
+    leaves:  (d.leaves||[]).map(l => ({ ...l, date: toYMD(l.date), span: SPAN[l.span] ? l.span : "full" })),
     deleted: (d.deleted||[]).map(String)
   };
 }
@@ -446,23 +440,9 @@ const weightOf = l => SPAN[spanOf(l)].w;
 const coversAM = l => spanOf(l)!=="pm";
 const coversPM = l => spanOf(l)!=="am";
 
-/* สถานะอนุมัติของใบลา — ใบที่ยังไม่ระบุถือว่ารออนุมัติ */
-const APPROVAL = {
-  pending:  { label:"รออนุมัติ",  short:"รออนุมัติ", pill:"pend" },
-  approved: { label:"อนุมัติแล้ว", short:"อนุมัติ",   pill:"ok"   },
-  rejected: { label:"ไม่อนุมัติ",  short:"ไม่อนุมัติ", pill:"bad"  }
-};
-const approvalOf = l => APPROVAL[l.approval] ? l.approval : "pending";
-/* ใบที่ไม่อนุมัติ ไม่นับเป็นวันลา ทั้งในโควตา ในปฏิทิน และในวันที่ซ้อนกัน */
-const counts = l => approvalOf(l) !== "rejected";
-
-function leavesOn(date){ return state.leaves.filter(l => l.date===date && counts(l)); }
+function leavesOn(date){ return state.leaves.filter(l => l.date===date); }
 function usedDays(id){
-  return state.leaves.filter(l => l.memberId===id && counts(l)).reduce((s,l)=>s+weightOf(l), 0);
-}
-function pendingDays(id){
-  return state.leaves.filter(l => l.memberId===id && approvalOf(l)==="pending")
-                     .reduce((s,l)=>s+weightOf(l), 0);
+  return state.leaves.filter(l => l.memberId===id).reduce((s,l)=>s+weightOf(l), 0);
 }
 /* จำนวนคนที่ลาอยู่ในแต่ละครึ่งวัน (นับคน ไม่ใช่นับวัน) */
 function slotCounts(date){
@@ -482,7 +462,7 @@ function othersOn(date, span, exceptMemberId){
 }
 /* คนเดิมลาวันเดียวกันซ้ำช่วงกันหรือไม่ */
 function overlapsOwn(memberId, date, span){
-  return state.leaves.some(l => l.memberId===memberId && l.date===date && counts(l) &&
+  return state.leaves.some(l => l.memberId===memberId && l.date===date &&
     ((span!=="pm" && coversAM(l)) || (span!=="am" && coversPM(l))));
 }
 
@@ -540,8 +520,8 @@ function renderCalendar(){
     if(picked.has(date)) cls += " sel";
     const chips = ls.map(l=>{
       const m = memberById(l.memberId); if(!m) return "";
-      const sp = SPAN[spanOf(l)].short, ap = approvalOf(l);
-      return `<span class="chip ${ap==="pending"?"wait":""}" style="background:${colorOf(m)}" title="${esc(m.name)} — ${SPAN[spanOf(l)].label} — ${APPROVAL[ap].label}${l.note?' — '+esc(l.note):''}">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
+      const sp = SPAN[spanOf(l)].short;
+      return `<span class="chip" style="background:${colorOf(m)}" title="${esc(m.name)} — ${SPAN[spanOf(l)].label}${l.note?' — '+esc(l.note):''}">${esc(m.name)}${sp?" ·"+sp:""}</span>`;
     }).join("");
     const cntTxt = (c.am===c.pm) ? `${c.am} คน` : `ช ${c.am} · บ ${c.pm}`;
     html += `<div class="${cls}" data-d="${d}" onclick="togglePick(${d})">
@@ -581,18 +561,15 @@ function renderConflicts(){
 function renderSummary(){
   const box = document.getElementById("summary");
   if(!state.members.length){ box.innerHTML = '<div class="empty-note">—</div>'; return; }
-  box.innerHTML = `<table><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>โควตา</th><th>ลาแล้ว</th><th>รออนุมัติ</th><th>คงเหลือ</th><th>วันที่ลา (ธ.ค.)</th></tr>` +
+  box.innerHTML = `<table><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>โควตา</th><th>ลาแล้ว</th><th>คงเหลือ</th><th>วันที่ลา (ธ.ค.)</th></tr>` +
     state.members.map(m=>{
-      const used = usedDays(m.id), wait = pendingDays(m.id);
-      const days = state.leaves.filter(l=>l.memberId===m.id && counts(l))
+      const used = usedDays(m.id);
+      const days = state.leaves.filter(l=>l.memberId===m.id)
                     .sort((a,b)=>a.date.localeCompare(b.date))
-                    .map(l=>{ const sp=SPAN[spanOf(l)].short, ap=approvalOf(l);
-                              return dayNum(l.date)+(sp?` (${sp})`:"")+(ap==="pending"?"*":""); });
+                    .map(l=>{ const sp=SPAN[spanOf(l)].short; return dayNum(l.date)+(sp?` (${sp})`:""); });
       const left = round5(m.quota-used);
       return `<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.role||"-")}</td><td>${m.quota}</td>
-        <td>${used}</td>
-        <td>${wait ? `<span class="pill pend">${wait}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
-        <td><b style="${left<0?"color:var(--bad)":""}">${left}</b>${left<0?' <span class="pill bad">เกินโควตา</span>':""}</td>
+        <td>${used}</td><td><b style="${left<0?"color:var(--bad)":""}">${left}</b>${left<0?' <span class="pill pend">เกินโควตา</span>':""}</td>
         <td>${days.length?days.join(", "):"<span style='color:var(--muted)'>ยังไม่ลา</span>"}</td></tr>`;
     }).join("") + `</table>`;
 }
@@ -601,29 +578,21 @@ function renderLeaves(){
   const box = document.getElementById("leaveList");
   const ls = [...state.leaves].sort((a,b)=>a.date.localeCompare(b.date));
   if(!ls.length){ box.innerHTML = '<div class="empty-note">ยังไม่มีการจดวันลา</div>'; return; }
-  box.innerHTML = `<table><tr><th>วันที่</th><th>ช่วง</th><th>ชื่อ</th><th>การอนุมัติ</th>
-      <th>ลาพร้อมกับ</th><th>หมายเหตุ</th><th></th></tr>` +
+  box.innerHTML = `<table><tr><th>วันที่</th><th>ช่วง</th><th>ชื่อ</th><th>ลาพร้อมกับ</th><th>หมายเหตุ</th><th></th></tr>` +
     ls.map(l=>{
       const m = memberById(l.memberId); if(!m) return "";
       const d = dayNum(l.date);
-      const ap = approvalOf(l);
-      const others = counts(l) ? othersOn(l.date, spanOf(l), l.memberId) : [];
-      const actions = ap === "pending"
-        ? `<button class="tiny ok-btn" onclick="setApproval('${l.id}','approved')">อนุมัติ</button>
-           <button class="tiny danger" onclick="setApproval('${l.id}','rejected')">ไม่อนุมัติ</button>`
-        : `<button class="tiny ghost" onclick="setApproval('${l.id}','pending')">กลับเป็นรออนุมัติ</button>`;
-      return `<tr${ap==="rejected"?' style="opacity:.55"':''}>
+      const others = othersOn(l.date, spanOf(l), l.memberId);
+      return `<tr>
         <td>${d} ธ.ค. (${DOW[dowIndex(d)]})</td>
         <td>${SPAN[spanOf(l)].label} <span style="color:var(--muted)">${weightOf(l)} วัน</span></td>
         <td><b>${esc(m.name)}</b></td>
-        <td style="white-space:nowrap">
-          <span class="pill ${APPROVAL[ap].pill}">${APPROVAL[ap].label}</span><br>${actions}</td>
         <td>${others.length
               ? `<span class="pill pend">${esc(others.join(", "))}</span>`
               : '<span style="color:var(--muted)">—</span>'}</td>
         <td>${esc(l.note||"-")}</td>
         <td style="text-align:right">
-          <button class="tiny danger" onclick="delLeave('${l.id}')">ลบ</button></td>
+          <button class="tiny danger" onclick="delLeave('${l.id}')">ยกเลิก</button></td>
       </tr>`;
     }).join("") + `</table>`;
 }
@@ -665,25 +634,14 @@ function submitLeave(){
     if(others.length) warn.push(`${dayNum(date)} ธ.ค. (${spLabel}): ลาซ้อนกับ ${esc(others.join(", "))}`);
     remain = round5(remain - w);
     if(remain < 0) warn.push(`${dayNum(date)} ธ.ค.: ใช้วันลาเกินโควตาของ ${esc(m.name)} แล้ว`);
-    state.leaves.push({ id:uid(), memberId:id, date, span, note, approval:"pending" });
+    state.leaves.push({ id:uid(), memberId:id, date, span, note });
     added.push(dayNum(date));
   }
   picked.clear();
   document.getElementById("noteInput").value = "";
-  const head = added.length
-    ? `ส่งใบลา ${added.join(", ")} ธ.ค. (${spLabel}) แล้ว — สถานะ <b>รออนุมัติ</b>`
-    : "ไม่มีวันที่บันทึกเพิ่ม";
+  const head = added.length ? `บันทึกวันลา ${added.join(", ")} ธ.ค. (${spLabel}) แล้ว` : "ไม่มีวันที่บันทึกเพิ่ม";
   showAlert(warn.length ? `${head}<br>⚠ ข้อควรระวัง:<br>• ${warn.join("<br>• ")}` : head,
             warn.length ? "" : "ok");
-  render();
-}
-
-function setApproval(lid, status){
-  const l = state.leaves.find(x=>x.id===lid); if(!l || !APPROVAL[status]) return;
-  l.approval = status;
-  const m = memberById(l.memberId);
-  showAlert(`ใบลา ${dayNum(l.date)} ธ.ค. ของ ${esc(m?m.name:"")} → <b>${APPROVAL[status].label}</b>`,
-            status === "approved" ? "ok" : "");
   render();
 }
 
@@ -820,7 +778,7 @@ async function shPullNow(){
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
    ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
 
-window.togglePick = togglePick; window.delLeave = delLeave; window.setApproval = setApproval;
+window.togglePick = togglePick; window.delLeave = delLeave;
 window.askDelMember = askDelMember; window.confirmDelMember = confirmDelMember; window.cancelDel = cancelDel;
 
 /* เตือนถ้าปิดหน้าขณะยังบันทึกไฟล์ไม่เสร็จ */
