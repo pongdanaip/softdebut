@@ -14,6 +14,7 @@
     --holiday:#8b5cf6; --holiday-soft:#f1ebff;
   }
   *{box-sizing:border-box}
+  [hidden]{display:none !important}   /* .grid{display:grid} ทับค่า default ของ hidden ได้ ต้องกันไว้ */
   body{margin:0;background:var(--bg);color:var(--ink);
        font-family:"Noto Sans Thai","Sarabun","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.55}
   .wrap{width:100%;margin:0;padding:24px 24px 64px}   /* เต็มความกว้างจอ */
@@ -129,6 +130,23 @@
     .cell{min-height:52px}
     .chip{font-size:0;padding:0;width:10px;height:10px;border-radius:50%}
   }
+
+  /* ---------- แท็บ ---------- */
+  .tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  .tabs button{background:#fff;color:var(--muted);border:1px solid var(--line);font-weight:600}
+  .tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+  /* ---------- Project on hand ---------- */
+  .ppl{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;color:#fff;
+       background:var(--muted);margin:1px 2px 1px 0;white-space:nowrap}
+  .ppl.off{opacity:.4;text-decoration:line-through}      /* คนที่ลาในวันที่เลือก */
+  .ppl.unknown{background:#fff;color:var(--muted);border:1px dashed var(--line)}
+  .sect{background:var(--bg);font-weight:700}
+  .day-badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:6px;margin:1px 2px 1px 0}
+  .day-badge.dark{background:var(--bad-soft);color:var(--bad)}
+  .day-badge.t1{background:var(--warn-soft);color:var(--warn)}
+  .proj-name{font-weight:600}
+  .note-cell{color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
@@ -143,7 +161,12 @@
     </div>
   </header>
 
-  <div class="grid">
+  <div class="tabs">
+    <button id="tabLeave" class="on">ปฏิทินวันลา</button>
+    <button id="tabProject">Project On hand</button>
+  </div>
+
+  <div class="grid" id="viewLeave">
     <!-- ซ้าย -->
     <div>
       <div class="card">
@@ -217,6 +240,38 @@
         <h2>รายการวันลาทั้งหมด</h2>
         <div id="leaveList"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= แท็บ Project On hand ================= -->
+  <div id="viewProject" hidden>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <h2 style="margin:0">Project On hand</h2>
+        <div class="row" style="flex:0 0 auto">
+          <button class="ghost" id="btnProjReload">ดึงข้อมูลใหม่</button>
+          <a class="ghost" id="lnkSheet" target="_blank" rel="noopener"
+             style="display:inline-block;padding:9px 14px;border:1px solid var(--line);border-radius:9px;
+                    text-decoration:none;color:var(--ink);font-size:14px;font-weight:600">เปิดชีตต้นทาง</a>
+        </div>
+      </div>
+      <div id="projStatus" class="storage" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h2>ผังโปรเจกต์และผู้รับผิดชอบ</h2>
+      <div id="projTable"></div>
+      <div class="legend" style="margin-top:12px">
+        <span><span class="day-badge dark">9</span> วันที่ทุกคนในโปรเจกต์ลาพร้อมกัน</span>
+        <span><span class="day-badge t1">9</span> วันที่ Tier1 ลา แต่ยังมีคนอื่นอยู่</span>
+        <span><span class="pill">N</span> Replacement = N คืองานที่ไม่ต้องการคนมารับช่วงแทน</span>
+        <span><span class="ppl unknown">ชื่อ</span> ไม่พบชื่อนี้ในระบบวันลา</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>วันที่โปรเจกต์ไม่เหลือคนดูแล</h2>
+      <div id="projRisk"></div>
     </div>
   </div>
 </div>
@@ -470,6 +525,9 @@ function overlapsOwn(memberId, date, span){
 function render(){
   renderMembers(); renderSelect(); renderCalendar(); renderConflicts();
   renderSummary(); renderLeaves(); renderPickInfo();
+  // ถ้ากำลังเปิดแท็บโปรเจกต์อยู่ ให้คำนวณความเสี่ยงใหม่ตามวันลาล่าสุดด้วย
+  const vp = document.getElementById("viewProject");
+  if(vp && !vp.hidden && typeof PROJECTS !== "undefined" && PROJECTS) renderProjects();
   save();
 }
 
@@ -774,6 +832,258 @@ async function shPullNow(){
   } catch(e){ showAlert("ดึงข้อมูลไม่สำเร็จ: " + esc(e.message)); }
 }
 
+
+/* ================= แท็บ Project On hand =================
+   อ่านผังโปรเจกต์สดจาก Google Sheet (ชีตเปิดให้ "ผู้ที่มีลิงก์" อ่านได้ จึงดึงตรงได้เลย
+   ไม่ต้องผ่าน Apps Script) แล้วจับคู่ชื่อเล่นในผังกับสมาชิกในระบบวันลา  */
+const PROJECT_SHEET_ID = "1zQ2G5AqFqpg22B7nvdBZBFxFPL2hsRNQCqLnuvcOZ1g";
+const PROJECT_CSV = `https://docs.google.com/spreadsheets/d/${PROJECT_SHEET_ID}/export?format=csv&gid=0`;
+const PROJECT_LINK = `https://docs.google.com/spreadsheets/d/${PROJECT_SHEET_ID}/edit`;
+/* ชื่อเล่นในผังที่สะกดไม่ตรงกับชื่อในระบบวันลา เติมคู่ที่ต้องเดาไว้ตรงนี้ */
+const ALIAS = { Ball:"ชานนท์", Gia:"เกียร์", A:"เอ", Pat:"แพท", Tar:"ต้า",
+                Fax:"แฟกซ์", Art:"อาท", Golf:"กอล์ฟ", Kim:"คิม", Granch:"Gracn", Jame:"James" };
+let PROJECTS = null, projLoading = false, projFilter = "active";
+/* สถานะงานจากชีต — ใช้ชี้ว่าโปรเจกต์ไหนที่การลากระทบจริง */
+const STATUS = {
+  "on process": { label:"On process", pill:"ok",   risk:true,  order:0 },
+  "stand by":   { label:"Stand by",   pill:"pend", risk:true,  order:1 },
+  "not active": { label:"Not Active", pill:"",     risk:false, order:2 }
+};
+const statusOf = p => STATUS[String(p.status||"").trim().toLowerCase()] || null;
+/* คอลัมน์ Replacement ในชีต — N = งานนี้ไม่ต้องการคนมารับช่วงแทนตอนเจ้าของลา
+   ว่างไว้ถือว่า Y (ต้องการ) */
+const needsRepl = p => !/^n/i.test(String(p.repl||"").trim());
+const isRisky  = p => { const s = statusOf(p); return (s ? s.risk : true) && needsRepl(p); };
+
+function parseCSV(text){
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c === '"' && text[i+1] === '"'){ cell+='"'; i++; }
+      else if(c === '"') q=false;
+      else cell+=c;
+    } else if(c === '"') q=true;
+    else if(c === ','){ row.push(cell); cell=""; }
+    else if(c === '\n'){ row.push(cell); rows.push(row); row=[]; cell=""; }
+    else if(c !== '\r') cell+=c;
+  }
+  if(cell.length || row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+
+/* ชื่อเล่น 1 ช่องอาจมีหลายคน เช่น "Park/Ball" */
+const splitNames = s => String(s||"").split("/").map(x=>x.trim()).filter(Boolean);
+
+/* จับคู่ชื่อเล่นในผัง กับสมาชิกในระบบวันลา
+   ไล่จากเข้มไปหลวม เพื่อไม่ให้ชื่อสั้น ๆ อย่าง "A" ไปโดนคำว่า "Bank" */
+function findMember(nick){
+  if(!nick) return null;
+  const key = nick.trim().toLowerCase();
+  const tokens = n => n.toLowerCase().split(/[^0-9a-z฀-๿]+/).filter(Boolean);
+  // 1) ชื่อตรงกันทั้งอัน
+  let m = state.members.find(x => x.name.trim().toLowerCase() === key);
+  // 2) ตรงกับคำใดคำหนึ่งในชื่อ เช่น "กชกร (แพท)" มีคำว่า "แพท"
+  if(!m) m = state.members.find(x => tokens(x.name).includes(key));
+  // 3) ชื่อเล่นที่สะกดไม่ตรงกัน ใช้ตารางเทียบ
+  if(!m && ALIAS[nick]){
+    const a = ALIAS[nick].toLowerCase();
+    m = state.members.find(x => tokens(x.name).includes(a))
+     || state.members.find(x => x.name.toLowerCase().includes(a));
+  }
+  // 4) ค่อยยอมให้เทียบแบบหลวม เฉพาะชื่อที่ยาวพอจะไม่ชนมั่ว
+  if(!m && key.length >= 3) m = state.members.find(x => x.name.toLowerCase().includes(key));
+  return m || null;
+}
+
+async function loadProjects(force){
+  if(projLoading || (PROJECTS && !force)) return;
+  projLoading = true;
+  const st = document.getElementById("projStatus");
+  st.className = "storage"; st.innerHTML = `<i class="dot" style="background:var(--muted)"></i>กำลังดึงผังโปรเจกต์…`;
+  try {
+    const r = await fetch(PROJECT_CSV + "&t=" + Date.now(), { cache:"no-store" });
+    if(!r.ok) throw new Error("อ่านชีตไม่สำเร็จ (HTTP " + r.status + ")");
+    const rows = parseCSV(await r.text());
+    // อ่านตามชื่อหัวคอลัมน์ เผื่อชีตสลับหรือแทรกคอลัมน์เพิ่มภายหลัง
+    const head = (rows[0]||[]).map(h=>h.trim().toLowerCase());
+    const col = n => head.indexOf(n);
+    const iName = Math.max(0, col("project"));
+    const iStat = col("project status");
+    const iRepl = col("replacement");
+    const iTier = [1,2,3,4].map(n => col("tier"+n));
+    const iNote = head.findIndex((h,i) => !h && i > 0 && i > Math.max(...iTier));
+    const items = []; let section = "Project";
+    rows.slice(1).forEach(cols=>{
+      const get = i => (i >= 0 ? (cols[i]||"").trim() : "");
+      const name = get(iName);
+      const tiers = iTier.map(get);
+      if(!name) return;
+      if(!tiers.some(Boolean)){ section = name; return; }   // แถวหัวข้อ เช่น "Support MA."
+      items.push({ name, section, tiers, status: get(iStat), repl: get(iRepl),
+                   note: iNote >= 0 ? get(iNote) : (cols[cols.length-1]||"").trim() });
+    });
+    PROJECTS = items;
+    st.className = "storage ok";
+    st.innerHTML = `<i class="dot"></i>ดึงจากชีตแล้ว <b>${items.length}</b> โปรเจกต์ เมื่อ ` +
+                   new Date().toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  } catch(e) {
+    st.className = "storage bad";
+    st.innerHTML = `<i class="dot"></i>ดึงผังโปรเจกต์ไม่สำเร็จ: ${esc(e.message)}`;
+  } finally {
+    projLoading = false;
+    renderProjects();
+  }
+}
+
+/* เก็บผลคำนวณความเสี่ยงของทุกโปรเจกต์ไว้ใช้ร่วมกัน คำนวณใหม่ทุกครั้งที่เรนเดอร์ */
+let RISKS = [];
+function buildRisks(){ RISKS = (PROJECTS||[]).map(p => ({ p, r: projectRisk(p) })); }
+
+const isOff = (id, d) => state.leaves.some(l => l.memberId===id && dayNum(l.date)===d);
+
+/* ระดับหัวหน้า/ผู้จัดการ ไม่ถูกเสนอให้ไปรับช่วงงานแทนใคร */
+const MANAGERS = ["bank"];
+const isManager = m => MANAGERS.includes((m.name||"").trim().toLowerCase())
+                    || /manager|ผู้จัดการ|หัวหน้า/i.test(m.role||"");
+
+/* ผู้รับช่วงที่เหมาะที่สุดของโปรเจกต์ในวันนั้น
+   shared = เคยทำโปรเจกต์ร่วมกับเจ้าของงานกี่ตัว ถ้าไม่มีใคร shared > 0 เลย
+   แปลว่ารับช่วงแบบฉุกเฉินไม่ได้ ต้องสลับวันลาหรือส่งมอบงานกันก่อน */
+function replacementsFor(r, d, load){
+  const ownerIds = r.known.map(m=>m.id);
+  return state.members
+    .filter(m => !ownerIds.includes(m.id) && !isOff(m.id, d) && !isManager(m))
+    .map(m => ({ m, shared: RISKS.filter(x => x.r.known.some(k=>k.id===m.id) &&
+                                              x.r.known.some(k=>ownerIds.includes(k.id))).length,
+                 load: (load && load[m.id]) || 0 }))
+    .sort((a,b) => a.load-b.load || b.shared-a.shared);
+}
+/* วันที่ทั้งทีมของโปรเจกต์ลาพร้อมกัน / วันที่ Tier1 ลา */
+function projectRisk(p){
+  const owners = p.tiers.flatMap(splitNames);
+  const known  = owners.map(findMember).filter(Boolean);
+  const t1     = splitNames(p.tiers[0]).map(findMember).filter(Boolean);
+  const dark=[], t1out=[];
+  for(let d=1; d<=31; d++){
+    if(!isWorkday(d)) continue;
+    const off = id => state.leaves.some(l => l.memberId===id && dayNum(l.date)===d);
+    if(known.length && known.every(m=>off(m.id))) dark.push(d);
+    else if(t1.length && t1.every(m=>off(m.id))) t1out.push(d);
+  }
+  return { owners, known, dark, t1out };
+}
+
+function renderProjects(){
+  const box = document.getElementById("projTable");
+  document.getElementById("lnkSheet").href = PROJECT_LINK;
+  if(!PROJECTS){ box.innerHTML = '<div class="empty-note">ยังไม่มีข้อมูล กด “ดึงข้อมูลใหม่”</div>'; return; }
+  buildRisks();
+  const counts = {};
+  PROJECTS.forEach(p=>{ const k=(statusOf(p)||{label:"ไม่ระบุ"}).label; counts[k]=(counts[k]||0)+1; });
+  const filters = [["active","กำลังเดิน (On process + Stand by)"],["on process","On process"],
+                   ["stand by","Stand by"],["not active","Not Active"],["all","ทั้งหมด"]];
+  let html = `<div class="row" style="margin-bottom:12px">` + filters.map(([k,label])=>
+      `<button class="tiny ${projFilter===k?"":"ghost"}" onclick="setProjFilter('${k}')">${label}</button>`).join("") +
+    `</div><div class="hint" style="margin:-6px 0 10px">` +
+      Object.entries(counts).map(([k,v])=>`${k} ${v}`).join(" · ") + `</div>`;
+  const shown = PROJECTS.filter(p=>{
+    const key = String(p.status||"").trim().toLowerCase();
+    if(projFilter === "all") return true;
+    if(projFilter === "active") return key !== "not active";
+    return key === projFilter;
+  });
+  if(!shown.length){ box.innerHTML = html + '<div class="empty-note">ไม่มีโปรเจกต์ในสถานะนี้</div>'; renderProjRisk(); return; }
+  html += `<table><tr><th>โปรเจกต์</th><th>สถานะ</th><th>Replacement</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Tier 4</th>
+                 <th>วันที่ต้องระวัง</th><th>หมายเหตุ</th></tr>`;
+  let sect = null;
+  shown.forEach(p=>{
+    if(p.section !== sect){ sect = p.section;
+      html += `<tr class="sect"><td colspan="9">${esc(sect)}</td></tr>`; }
+    const r = (RISKS.find(x=>x.p===p)||{}).r || projectRisk(p);
+    const replCell = needsRepl(p)
+      ? `<span class="pill ok">${esc(String(p.repl||"Y").trim())}</span>`
+      : `<span class="pill" title="งานนี้ไม่ต้องการคนมารับช่วงแทน">${esc(String(p.repl).trim())}</span>`;
+    const st = statusOf(p);
+    const stCell = st ? `<span class="pill ${st.pill}">${st.label}</span>`
+                      : `<span style="color:var(--muted)">${esc(p.status||"—")}</span>`;
+    const cell = v => splitNames(v).map(n=>{
+      const m = findMember(n);
+      return m ? `<span class="ppl" style="background:${colorOf(m)}" title="${esc(m.name)}">${esc(n)}</span>`
+               : `<span class="ppl unknown" title="ไม่พบชื่อนี้ในระบบวันลา">${esc(n)}</span>`;
+    }).join("") || '<span style="color:var(--muted)">—</span>';
+    const badges = r.dark.map(d=>`<span class="day-badge dark" title="ทุกคนลาพร้อมกัน">${d}</span>`).join("") +
+                   r.t1out.map(d=>`<span class="day-badge t1" title="Tier1 ลา">${d}</span>`).join("") ||
+                   '<span style="color:var(--muted)">—</span>';
+    html += `<tr${isRisky(p)?"":' style="opacity:.55"'}><td class="proj-name">${esc(p.name)}</td>
+      <td style="white-space:nowrap">${stCell}</td>
+      <td style="white-space:nowrap">${replCell}</td>
+      <td>${cell(p.tiers[0])}</td><td>${cell(p.tiers[1])}</td>
+      <td>${cell(p.tiers[2])}</td><td>${cell(p.tiers[3])}</td>
+      <td>${badges}</td>
+      <td class="note-cell">${esc(p.note||"")}</td></tr>`;
+  });
+  box.innerHTML = html + `</table>`;
+  renderProjRisk();
+}
+
+/* ตารางสรุปรายวัน พร้อมผู้รับช่วงที่แนะนำ */
+function renderProjRisk(){
+  const box = document.getElementById("projRisk");
+  if(!PROJECTS){ box.innerHTML = '<div class="empty-note">—</div>'; return; }
+  buildRisks();
+  const all = RISKS;
+  const rows=[], swapAlerts=[];
+  for(let d=1; d<=31; d++){
+    if(!isWorkday(d)) continue;
+    // งานที่ปิดไปแล้ว (Not Active) ไม่ถือเป็นความเสี่ยง และเรียง On process ขึ้นก่อน
+    const dark = all.filter(x=>x.r.dark.includes(d) && isRisky(x.p))
+                    .sort((a,b)=>((statusOf(a.p)||{order:9}).order)-((statusOf(b.p)||{order:9}).order));
+    if(!dark.length) continue;
+    const load={};
+    const items = dark.map(({p,r})=>{
+      const cands = replacementsFor(r, d, load);
+      const pick = cands[0];
+      if(pick) load[pick.m.id] = (load[pick.m.id]||0)+1;
+      if(!cands.some(c=>c.shared>0)) swapAlerts.push({d, name:p.name});
+      const st = statusOf(p);
+      return `<tr><td style="white-space:nowrap">${d} ธ.ค. (${DOW[dowIndex(d)]})</td>
+        <td>${esc(p.name)}<br>${st?`<span class="pill ${st.pill}">${st.label}</span>`:""}</td>
+        <td>${r.known.map(m=>`<span class="ppl off" style="background:${colorOf(m)}">${esc(m.name)}</span>`).join("")}</td>
+        <td>${pick ? `<span class="ppl" style="background:${colorOf(pick.m)}">${esc(pick.m.name)}</span>`
+                     + (pick.shared ? "" : ' <span class="pill bad">ต้องสลับคน</span>'
+                        + '<div class="hint" style="margin:2px 0 0">ไม่มีใครเคยร่วมงานนี้ ควรให้เจ้าของเลื่อนวัน หรือส่งมอบงานก่อนลา</div>')
+                   : '<span class="pill bad">ไม่มีใครว่าง</span>'}</td></tr>`;
+    });
+    rows.push(items.join(""));
+  }
+  const banner = swapAlerts.length
+    ? `<div class="alert" style="margin-bottom:12px">⚠ <b>ต้องสลับคน ${swapAlerts.length} จุด</b> — ` +
+      swapAlerts.map(s=>`${s.d} ธ.ค. ${esc(s.name)}`).join(" · ") +
+      `<br>วันเหล่านี้ไม่มีใครที่เคยร่วมงานมารับช่วงได้ ต้องให้เจ้าของเลื่อนวันลา หรือส่งมอบงานให้คนอื่นก่อน</div>`
+    : `<div class="alert ok" style="margin-bottom:12px">ทุกวันที่งานขาดคน มีคนที่เคยร่วมงานรับช่วงต่อได้ ไม่ต้องสลับวันลา</div>`;
+  box.innerHTML = rows.length
+    ? banner + `<table><tr><th>วันที่</th><th>โปรเจกต์</th><th>คนที่ลา</th><th>ผู้รับช่วงที่แนะนำ</th></tr>${rows.join("")}</table>
+       <div class="hint">นับเฉพาะงานที่ยังเดินอยู่ (On process และ Stand by) และที่ Replacement = Y
+         งานที่ Not Active หรือ Replacement = N ไม่ถือเป็นความเสี่ยง ·
+         ผู้รับช่วงเลือกจากคนที่ว่างวันนั้น และเคยทำโปรเจกต์ร่วมกับเจ้าของงานมากที่สุด โดยไม่ให้ใครรับเกิน 1 งานต่อวัน ·
+         ระดับหัวหน้า/ผู้จัดการไม่ถูกนับเป็นผู้รับช่วง</div>`
+    : '<div class="empty-note">ไม่มีวันไหนที่งานซึ่งยังเดินอยู่ขาดคนดูแลทั้งหมด</div>';
+}
+
+function switchTab(which){
+  const onProject = which === "project";
+  document.getElementById("viewLeave").hidden = onProject;
+  document.getElementById("viewProject").hidden = !onProject;
+  document.getElementById("tabLeave").classList.toggle("on", !onProject);
+  document.getElementById("tabProject").classList.toggle("on", onProject);
+  if(onProject) loadProjects();
+}
+function setProjFilter(k){ projFilter = k; renderProjects(); }
+window.setProjFilter = setProjFilter;
+document.getElementById("tabLeave").onclick = ()=>switchTab("leave");
+document.getElementById("tabProject").onclick = ()=>switchTab("project");
+document.getElementById("btnProjReload").onclick = ()=>loadProjects(true);
 
 /* ปิดการนำเข้า/ส่งออกไฟล์จากหน้าเว็บแล้ว — ข้อมูลทั้งหมดอยู่ในไฟล์ data.json
    ที่ server.py บันทึกให้อัตโนมัติ ถ้าต้องการสำเนา ให้คัดลอกไฟล์นั้นโดยตรง */
